@@ -1,12 +1,16 @@
 # MoBA 稀疏 Attention GPU 优化：技术报告
 
-日期：2026-10-16。机器：gpu-node1 单张 NVIDIA A40 48GB（CC 8.6，driver 580.95.05）。
+日期：2026-10-16（同日经一轮外部审查后修订）。机器：gpu-node1 单张 NVIDIA A40 48GB（CC 8.6，driver 580.95.05）。
 上游：MoonshotAI/MoBA @ `b5d58363311d3ca946f1ec444182727c15e338b5`（冻结，零改动；`third_party/UPSTREAM_SHA.txt`）。
 环境：Python 3.10.22 / torch 2.4.0+cu121 / flash-attn 2.6.3（源码编译，nvcc 12.9）/ 自研 CUDA 扩展（sm_86，无 fast-math）。完整锁定：`environment.lock.txt`。
 
 ## 一句话结论
 
-在不改变选块结果、因果约束、序列隔离和 Attention 语义的前提下，用 CUDA kernel（原子建图 + 全局 softmax 合并）替换官方实现中的 PyTorch 合并阶段，在单 A40、12 个核心配置 + 11 个补充配置上，完整 Attention **前向提速 1.07–1.38×，前反向合计提速 1.064–1.129×（几何平均 1.088×）**，反向严格不变，显存持平或略降，全部 127 项测试通过。
+在不改变选块结果、因果约束、序列隔离和 Attention 语义的前提下，用 CUDA kernel（原子建图 + 全局 softmax 合并）替换官方实现中的 PyTorch 合并阶段，在单 A40、12 个核心配置 + 11 个补充配置 + 1 个冷元数据场景上，完整 Attention **前向提速 1.120–1.457×，前反向合计提速 1.067–1.129×（几何平均 1.088×）**，反向耗时比 0.997–1.006（未改动，噪声内）。全部 127 项测试通过。（显存对比结论在审查中发现测量缺陷，已撤回，修复后重测，见第 5 节。）
+
+## 统计口径（全报告唯一）
+
+配对方式：同进程、同输入张量、AB/BA 交替（轮级换序 + 样本级交错），5 轮 ×30 计时样本 + 20 预热，暖元数据（同一不可变 cu_seqlens 对象；冷场景单列）。统计量：**每轮取中位数，再取跨轮中位数**；speedup 为同一统计量之比。汇总由 `scripts/summarize_results.py` 从原始 JSONL 生成（`results/summaries/`），终端打印与该口径一致。kernel/stage 级数字只用于解释机制，不作为完整算子加速结论。
 
 ## 1. 为什么选这个瓶颈
 
@@ -23,10 +27,10 @@
 
 ## 2. 改动保持了什么语义
 
-- 路由代码（gate 打分、mask、torch.topk、打包）与冻结基线**逐行一致**，`calc_chunks` 直接 import 上游（共享缓存）；选块集合与官方**逐位相同**（`tests/test_attention_opt.py::test_route_identity_with_official`）。
-- k=1 fallback（该版本下走全量 causal FA）原样保留，输出与官方**逐位一致**。
-- 反向结构与公式与官方逐行一致：两路私有 FA backward 均使用合并后的**全局 O、全局 LSE**（`moba_efficient.py` 的 `MixedAttention.backward` 语义）。
-- 不支持的输入（dtype/布局/空序列/非法 cu_seqlens/head 数不匹配）显式报错，有测试覆盖。
+- 路由代码（gate 打分、mask、torch.topk、打包）与冻结基线**逐行一致**，`calc_chunks` 直接 import 上游（共享缓存）；**选块集合与官方逐位相同**（`tests/test_attention_opt.py::test_route_identity_with_official`）。"逐位一致"只声明到离散选块与 k=1 fallback 分支；**连续输出值是"在明确容差内对齐"，不是逐位保证**（见第 3、5 节）。
+- k=1 fallback（该版本下走全量 causal FA）调用同一函数，输出逐位一致。
+- 反向结构与公式与官方逐行一致：两路私有 FA backward 均使用合并后的**全局 O、全局 LSE**。
+- 不支持的输入（dtype/布局/空序列/非法 cu_seqlens/head 数不匹配）显式报错，有测试覆盖；子算子的槽位容量溢出在两个后端都显式报错（CUDA 端经溢出计数器由 launcher 抛出，Triton 端由 counts 检查抛出；集成路径因官方路由的结构性上界 counts ≤ topk-1 而豁免逐次同步检查，豁免处有注释与证明）。
 
 ## 3. 如何处理全局归一化和梯度
 
@@ -37,21 +41,24 @@ m = max_j(l_j);  w_j = exp(l_j - m);  z = Σ_j w_j
 O = Σ_j (w_j o_j) / z;  L = m + log(z)
 ```
 
-不能简单平均或按块大小加权（证据与推导见 `reference/merge_reference.py` 及 `docs/semantics.md` §6–7）。CUDA kernel 内全部 FP32 计算（`expf/logf` 精确版，无 fast-math），O cast 回输入 dtype，L 保持 FP32。无效槽位显式屏蔽（权重 0），不读非法地址、不产生 NaN（极端 LSE ±1e30 用例覆盖）。
+不能简单平均或按块大小加权（推导见 `reference/merge_reference.py` 及 `docs/semantics.md` §6–7）。CUDA kernel 内全部 FP32 计算（`expf/logf` 精确版，无 fast-math），O cast 回输入 dtype，L 保持 FP32。无效槽位显式屏蔽（权重 0），不读非法地址、不产生 NaN（极端 LSE ±1e30 用例覆盖）；合并 kernel 内对 counts 做防御性容量截断，容量溢出在独立 API 默认显式报错。
 
-梯度：合并原语位于自定义 autograd.Function 内部，反向由整体定制 backward 处理（沿用官方结构），因此**不需要为合并单独写 backward kernel**；验证方式是固定路由下的随机 VJP 对照（多个 seed、dQ/dK/dV 逐项，官方口径 max<4e-2 / mean<4e-4），另以固定路由 FP64 独立参考交叉验证（`tests/test_attention_opt*.py`、`test_merge_fixtures.py`）。
+梯度验证的准确口径：
 
-合并数学本身以 FP64 参考 + 有限差分校验（VJP 公式 `d o_j = α_j g`、`d l_j = α_j⟨g, o_j − O⟩`，atol 1e-6），且在真实 fixture 上验证了**官方合并 == 上述公式**（out ≤1.9e-3 = bf16 cast 量级，lse ≤5.6e-7）——kernel 建立在已验证的语义上。
+- 合并原语的 VJP 公式（`d o_j = α_j g`、`d l_j = α_j⟨g, o_j − O⟩`）经 FP64 有限差分校验（atol 1e-6）。
+- 完整路径的 dQ/dK/dV 是**固定路由下与官方实现对照**（多个 seed 的随机 VJP，官方口径 max<4e-2 / mean<4e-4）；反向结构本就逐行沿用官方，该对照验证的是"新前向产出的全局 O/LSE 在官方反向中正确"。
+- FP64 独立参考验证了完整前向**输出**（S01–S05，max_abs ≤8.0e-3 = BF16 舍入量级）；它不是独立的 FP64 梯度验证。
+- 合并子算子另在真实 fixture 上验证**官方合并 == 上述公式**（out ≤1.9e-3 = bf16 cast 量级，lse ≤5.6e-7）。
 
 ## 4. 收益在哪里
 
-主指标：同进程 AB/BA 配对，5 轮 ×30 样本 + 20 预热，暖元数据，每轮中位数（原始记录 `results/raw/paired_*_cuda.jsonl`，汇总 `results/summaries/summary_20261016T074740Z.{md,csv}`）。
+原始记录 `results/raw/paired_*_cuda.jsonl`，汇总 `results/summaries/summary_20261016T074740Z.{md,csv}`（统计口径见篇首）。
 
-**完整 Attention 前+反向（训练模式）speedup vs 冻结官方实现**：
+**完整 Attention 前+反向（训练模式）speedup vs 冻结官方实现（CUDA 后端）**：
 
 | 组 | 配置 | speedup |
 |---|---|---:|
-| 核心 12 | C01–C12（T=2K/8K/32K × H=1/8 × D=64/128，BF16，C=512，K=4） | 1.064–1.097 |
+| 核心 12 | C01–C12（T=2K/8K/32K × H=1/8 × D=64/128，BF16，C=512，K=4） | 1.067–1.097 |
 | FP16 | 短/中/长三代表 | 1.084–1.092 |
 | 块长 | C=128 / 256 / 1024 | **1.129** / 1.118 / 1.067 |
 | top-k | K=2 / K=8 | 1.084 / 1.097 |
@@ -59,44 +66,56 @@ O = Σ_j (w_j o_j) / z;  L = m + log(z)
 | 尾块 | T=8193，C=512 | 1.075 |
 | 冷元数据 | C08，每次新长度对象 | 1.088 |
 
-全部 24 行几何平均 **1.088×**，min 1.064，无退化配置。**前向**单列 speedup 1.07–1.38（C08 1.36、C12 1.31、CH128 1.25）；**反向** 0.998–1.001（未改动，噪声内）。stage 级对照：官方合并阶段 3.94ms → CUDA 0.654ms（C12，6.0×）。显存：C01–C11 持平，C12 −45MB（消除了合并的 FP32 输出缓冲）。
+全部 24 行：前反向 **1.067–1.129×**，几何平均 **1.0878×**；前向 **1.120–1.457×**；纯前向（no_grad）1.156–1.464×；反向耗时比 0.997–1.006。无退化配置。stage 级对照（含容量检查开销的独立 API 口径见 `results/raw/kernel_v4_cuda_*.jsonl`）：官方合并阶段 3.94ms → CUDA 0.654ms（C12，约 6.0×）。
 
 消融链（方案 9.3）：V0 基线 → V1 加诊断标记（0.985–0.997×，仪器成本 ≤1.5%）→ V2 kernel-only（映射预建，stage 2.6–3.8×）→ V3 全路径（上表）。开发期证据：torch 建图（argsort 方案）会抵消全部收益（stage 0.52–1.54×），原子建图 kernel（0.02–0.03ms）是收益成立的必要条件。
+
+独立重复（代码冻结后另一次运行、seed=1）：127/127 测试通过；C01/C08/C12 前反向 1.093 / 1.092 / 1.090，与首轮（1.093 / 1.093 / 1.090）一致（`results/raw/repeat1_C01_C08_C12_cuda.jsonl`）。
 
 ## 5. 额外成本是什么
 
 - 每行前向新增：槽位/workspace 分配（`slots [P,KPAD] int32`、`counts [P] int32`）、原子建图 1 kernel + 合并 1 kernel（合计 0.02–0.07ms）。已计入上述全部数字。
-- 原子票据顺序不确定 → lane 级累加次序逐运行可变，输出波动 ≤1 BF16 ulp（有测试界限；官方 `index_add_` 原子序同样不确定）。
-- 显存变化见上（不降反微降）。
-- 首次 JIT 编译扩展 ~25 min（慢盘 + 共享机），warm cache 后 ~1 min；记入复现文档。
+- 原子票据顺序不确定 → lane 级累加次序逐运行可变。声明口径：**保持数学语义、输出在明确容差内对齐**（重复运行波动实测在 atol 1e-6 / rtol 1e-5 内，FP32 合成用例）；不提供逐位或逐 ulp 保证。官方 `index_add_` 原子序同样不确定。
+- **显存**：审查发现此前的显存对比测量存在泄漏偏差（预热残留输出未释放），"持平/略降"结论**已撤回**；修复（测前释放 + 设备限定查询 + 按方案 8.5 独立进程分别测量）后的重测结果将更新于此。待定。
+- 首次 JIT 编译扩展 ~25 min（慢盘 + 共享机），warm cache 后 ~1 min。
 
 ## 6. 哪些配置不适用
 
-见 `docs/known_limits.md`。要点：仅 MHA、causal、dropout=0、packed varlen、D=64/128、单卡 A40；K=1 是官方全量 FA fallback 不参与稀疏加速统计；H=1/小 T 收益最小（1.064）；不推广到未测形状；收益仅在前向。
+见 `docs/known_limits.md`。要点：仅 MHA、causal、dropout=0、packed varlen、D=64/128、单卡 A40；K=1 是官方全量 FA fallback 不参与稀疏加速统计；H=1/小 T 配置收益最小；不推广到未测形状；收益仅在前向。
 
 ## 复现
 
 ```bash
 source scripts/env.sh
 python scripts/check_environment.py      # 环境证据（CPU 安全）
+bash scripts/gen_test_fixtures.sh        # 生成测试 fixture（GPU；测试结果依赖，不入库）
 bash scripts/smoke.sh                    # 探针 + 官方 324 例（GPU）
-python -m pytest tests/ -q               # 127 项（GPU）
+python -m pytest tests/ -q               # 127 项（GPU；缺 fixture 时相关项干净跳过）
 python benchmarks/benchmark_attention.py --config configs/core12.yaml \
-  --ids C01,C08,C12 --impl official,opt_merge_cuda --rounds 5 --samples 30 \
-  --warmup 20 --out results/raw/repro.jsonl
-python scripts/summarize_results.py results/raw/repro.jsonl
+  --ids C01,C02,C03,C04,C05,C06,C07,C08,C09,C10,C11,C12 \
+  --impl official,opt_merge_cuda --rounds 5 --samples 30 --warmup 20 \
+  --out results/raw/repro_core12.jsonl
+python scripts/summarize_results.py results/raw/repro_core12.jsonl
 ```
 
-实测耗时（本机）：依赖齐备后 smoke ~2 min；测试套件 ~10s–3min（JIT 冷/热）；三配置配对 ~1 min。首次安装与编译另计：`docs/environment_day1.md`。
+实测耗时（本机）：依赖齐备后 smoke ~2 min；测试套件 ~10s–3min（JIT 冷/热）；12 配置配对 ~2 min。首次安装与编译另计：`docs/environment_day1.md`。
 
-独立重复（代码冻结后另一次运行、seed=1）：127/127 测试通过；C01/C08/C12 前反向 speedup 1.090 / 1.092 / 1.090，与首轮（1.093 / 1.093 / 1.090）一致（`results/raw/repeat1_C01_C08_C12_cuda.jsonl`）。
+## 外部审查后的修订记录（2026-10-16）
+
+1. CUDA 扩展与计时/分析脚本补齐设备绑定（`CUDAGuard` / 显式 device 上下文 / 设备限定查询）；新增双卡回归测试（需双卡授权后启用）。
+2. 显存对比结论撤回：修复测量泄漏后按方案 8.5 独立进程重测。
+3. 子算子容量溢出：两个后端均改为显式报错（此前溢出时 counts 越界、合并会读未初始化槽位）；集成路径凭官方路由结构性上界豁免逐次检查（代码内注释）。
+4. 全文撤去"≤1 ulp"式逐位暗示，改为语义保持 + 明确容差；区分选块逐位一致与输出数值接近。
+5. 统计口径统一为"轮中位数的跨轮中位数"，终端打印与汇总脚本一致；报告数字全部由汇总脚本重算（前向 1.120–1.457×、前反向 1.067–1.129×、几何平均 1.0878×、反向 0.997–1.006）。
+6. 测试 fixture（路由/合并）新增生成脚本 `scripts/gen_test_fixtures.sh` 并写入复现流程；缺失时相关测试干净跳过（原硬编码路径会失败的测试已改 skip）。
+7. 措辞修正：FP64 独立参考验证的是前向输出；梯度为固定路由下与官方对照，不称独立 FP64 梯度验证。
 
 ## 简历口径（方案 14.1，全部来自可追溯实测）
 
 > **MoBA 稀疏 Attention GPU 优化**
 >
 > - 基于 PyTorch Profiler 分阶段拆解路由、数据重排、FlashAttention 与结果合并开销，定位全局 softmax 结果合并阶段（占前向 20–28%）。
-> - 使用 C++/CUDA（原子计数逆映射 + warp-per-row 合并 kernel，FP32 稳定合并，无 fast-math）替换官方 PyTorch 合并路径，保持选块集合与全局归一化语义逐位一致，反向沿用官方结构；完成 BF16/FP16、变长序列、尾块的输出与 dQ/dK/dV 验证（127 项测试，含 FP64 固定路由独立参考交叉验证）。
-> - 单 A40、24 组配对配置（AB/BA、5 轮×30 样本）：完整 Attention 前向提速 1.07–1.38×、前反向合计提速 1.064–1.129×（几何平均 1.088×），反向不变，显存持平或略降，无退化配置；阶段级合并快 4.6–6.0×。
+> - 使用 C++/CUDA（原子计数逆映射 + warp-per-row 合并 kernel，FP32 稳定合并，无 fast-math）替换官方 PyTorch 合并路径，选块集合与官方逐位一致、全局归一化语义不变，反向沿用官方结构；完成 BF16/FP16、变长序列、尾块的输出与 dQ/dK/dV 验证（127 项测试，含 FP64 固定路由独立参考对输出的交叉验证）。
+> - 单 A40、24 组配对配置（AB/BA、5 轮×30 样本）：完整 Attention 前向提速 1.120–1.457×、前反向合计提速 1.067–1.129×（几何平均 1.088×），反向不变，无退化配置；阶段级合并快 4.6–6.0×。
 
-技术栈备注：Triton 版作为验证期参考实现保留（`ops/merge_triton.py`），主贡献为 CUDA 版；两次 FlashAttention 调用与官方 backward 未重写。
+技术栈备注：Triton 版作为验证期参考实现保留（`ops/merge_triton.py`），主贡献为 CUDA 版；两次 FlashAttention 调用与官方 backward 未重写。显存对比数字待重测后再决定是否写入简历。

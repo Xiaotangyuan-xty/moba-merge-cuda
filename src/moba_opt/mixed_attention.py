@@ -90,6 +90,9 @@ class OptMixedAttention(torch.autograd.Function):
         )
 
         # replaced stage: global-softmax merge (plan 4.3 math), Triton or CUDA
+        # check_capacity=False: the official routing above selects at most
+        # moba_topk chunks per query/head, so counts <= moba_topk = kmax <= kpad
+        # holds structurally; the standalone merge APIs keep the check on.
         if merge_backend == MERGE_BACKEND_CUDA:
             from .ops.merge_cuda import merge_forward_cuda
 
@@ -100,6 +103,7 @@ class OptMixedAttention(torch.autograd.Function):
                 moba_attn_lse_hs.reshape(-1),
                 moba_q_sh_indices,
                 kmax=moba_topk,
+                check_capacity=False,
             )
         else:
             output, mixed_attn_lse_sh = merge_forward(
@@ -110,6 +114,7 @@ class OptMixedAttention(torch.autograd.Function):
                 moba_q_sh_indices,
                 kmax=moba_topk,
                 builder="atomic",
+                check_capacity=False,
             )
 
         ctx.save_for_backward(

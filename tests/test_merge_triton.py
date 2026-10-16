@@ -119,6 +119,14 @@ def test_capacity_overflow_raises():
         run(so, sl, ro, rl, mp, kmax=2)
 
 
+def test_atomic_capacity_overflow_raises():
+    # same contract on the atomic builder: counts exceed kpad -> explicit error
+    # instead of reading uninitialized slots.
+    so, sl, ro, rl, mp = synth([3, 0], seed=6)
+    with pytest.raises(ValueError, match="capacity exceeded"):
+        run(so, sl, ro, rl, mp, kmax=2, builder="atomic")
+
+
 @pytest.mark.parametrize("P", [1, 7, 33])
 def test_odd_p_tail(P):
     counts = [i % 3 for i in range(P)]
@@ -230,7 +238,9 @@ def test_atomic_repeat_fluctuation_bounded():
     so, sl, ro, rl, mp = synth(counts, seed=16)
     out0, lse0 = run(so, sl, ro, rl, mp, kmax=4, builder="atomic")
     out1, lse1 = run(so, sl, ro, rl, mp, kmax=4, builder="atomic")
-    # atomic assignment order is arbitrary: lane-level accumulation order may
-    # change between runs; fluctuation must stay at fp32-ulp scale (plan 7.4).
+    # atomic ticket order is arbitrary, so lane-level accumulation order may
+    # change between runs. Semantics are preserved and repeated runs must stay
+    # within this explicit fp32-order tolerance -- no bitwise/per-ulp guarantee
+    # is claimed (plan 7.4 last row; the official index_add_ is also atomic).
     assert torch.allclose(out0, out1, atol=1e-6, rtol=1e-5)
     assert torch.allclose(lse0, lse1, atol=1e-6, rtol=1e-5)

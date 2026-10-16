@@ -81,10 +81,10 @@ def test_cuda_fixed_route_fp64():
 
     from reference.fixed_route_attention import fixed_route_attention
 
-    payload = torch.load(
-        Path(__file__).resolve().parents[1] / "results" / "raw" / "routes" / "S02_seed0.pt",
-        map_location="cpu", weights_only=False,
-    )
+    route_path = Path(__file__).resolve().parents[1] / "results" / "raw" / "routes" / "S02_seed0.pt"
+    if not route_path.exists():
+        pytest.skip("route fixtures not generated; run scripts/gen_test_fixtures.sh first (GPU-gated)")
+    payload = torch.load(route_path, map_location="cpu", weights_only=False)
     cfg = payload["config"]
     route = payload["route"]
     q = payload["q"].cuda()

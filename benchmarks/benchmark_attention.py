@@ -2,17 +2,21 @@
 """Paired timing harness (plan 8.1-8.4, 9.4): attention fwd and fwd+bwd,
 layers 3/4 -- the primary performance evidence.
 
---impl accepts a comma list (e.g. official,opt_merge_atomic). Both impls run
-in the same process on the SAME leaf tensors; sample order alternates AB/BA
-per round parity and interleaves per sample (plan 8.2 item 5). autograd.grad
-is used (no accumulation). The same immutable cu_seqlens object feeds every
-call (warm metadata, plan 8.3), warmed per impl before timing.
+--impl accepts a comma list (e.g. official,opt_merge_cuda). Both impls run in
+the same process on the SAME leaf tensors; sample order alternates AB/BA per
+round parity and interleaves per sample (plan 8.2 item 5). autograd.grad is
+used (no accumulation). The same immutable cu_seqlens object feeds every call
+(warm metadata, plan 8.3), warmed per impl before timing.
 
 Per training-mode sample:  t0 --fwd--> sync t1 --backward--> sync t2
   fwd_wall_ms / bwd_wall_ms / fwd_bwd_wall_ms from perf_counter;
   CUDA events wrap the fwd and bwd regions separately (stream time, may
   include idle gaps -- not "pure kernel time", plan 8.2).
 Inference-mode forward (torch.no_grad) measured in separate samples.
+
+Statistics: per-round medians, then the median across rounds (the same
+statistic summarize_results.py uses). All device work runs under an explicit
+torch.cuda.device context; sync/events/memory queries are device-qualified.
 
 One JSONL record per (impl, config, round). OOM/interruption keep a status
 record. GPU-gated: run only with explicit approval after an idle check.
@@ -62,19 +66,19 @@ def build_inputs(cfg, device, seed):
     return q, k, v, cu, max(lens), g
 
 
-def timed_sample(fwd, q, k, v, g):
+def timed_sample(fwd, q, k, v, g, device):
     e0, e1, e2, e3 = (torch.cuda.Event(enable_timing=True) for _ in range(4))
-    torch.cuda.synchronize()
+    torch.cuda.synchronize(device)
     t0 = time.perf_counter()
     e0.record()
     out = fwd()
     e1.record()
-    torch.cuda.synchronize()
+    torch.cuda.synchronize(device)
     t1 = time.perf_counter()
     e2.record()
     torch.autograd.grad(out, (q, k, v), grad_outputs=g)
     e3.record()
-    torch.cuda.synchronize()
+    torch.cuda.synchronize(device)
     t2 = time.perf_counter()
     del out
     return {
@@ -87,84 +91,86 @@ def timed_sample(fwd, q, k, v, g):
 
 
 def measure(impls, cfg, device, rounds, samples, warmup, seed, metadata="warm"):
-    q, k, v, cu, max_len, g = build_inputs(cfg, device, seed)
-    for t in (q, k, v):
-        t.requires_grad_(True)
+    with torch.cuda.device(device):
+        q, k, v, cu, max_len, g = build_inputs(cfg, device, seed)
+        for t in (q, k, v):
+            t.requires_grad_(True)
 
-    cu_holder = {"cu": cu}
+        cu_holder = {"cu": cu}
 
-    def fwd(impl):
-        # warm: the same immutable cu object is reused everywhere -> warm cache.
-        # cold: caller swaps in a fresh tensor object (same values) per call ->
-        # metadata rebuilt every time (plan 8.3 dynamic-metadata scenario).
-        return run_impl(impl, q, k, v, cu_holder["cu"], max_len, cfg)
+        def fwd(impl):
+            # warm: the same immutable cu object is reused everywhere -> warm cache.
+            # cold: caller swaps in a fresh tensor object (same values) per call ->
+            # metadata rebuilt every time (plan 8.3 dynamic-metadata scenario).
+            return run_impl(impl, q, k, v, cu_holder["cu"], max_len, cfg)
 
-    def maybe_cold():
-        if metadata == "cold":
-            cu_holder["cu"] = cu.clone()
+        def maybe_cold():
+            if metadata == "cold":
+                cu_holder["cu"] = cu.clone()
 
-    for impl in impls:
-        for _ in range(warmup):
-            maybe_cold()
+        out = None
+        for impl in impls:
+            for _ in range(warmup):
+                maybe_cold()
+                out = fwd(impl)
+                torch.autograd.grad(out, (q, k, v), grad_outputs=g)
+        cu_holder["cu"] = cu
+        del out  # drop the last warmup output before any memory measurement
+        torch.cuda.synchronize(device)
+
+        mem = {}
+        for impl in impls:
+            torch.cuda.synchronize(device)
+            torch.cuda.reset_peak_memory_stats(device)
+            before = torch.cuda.memory_allocated(device)
             out = fwd(impl)
             torch.autograd.grad(out, (q, k, v), grad_outputs=g)
-    cu_holder["cu"] = cu
-    torch.cuda.synchronize()
-
-    mem = {}
-    for impl in impls:
-        torch.cuda.reset_peak_memory_stats()
-        before = torch.cuda.memory_allocated()
-        out = fwd(impl)
-        torch.autograd.grad(out, (q, k, v), grad_outputs=g)
-        torch.cuda.synchronize()
-        mem[impl] = {
-            "allocated_before_bytes": before,
-            "peak_allocated_bytes": torch.cuda.max_memory_allocated(),
-            "reserved_bytes": torch.cuda.memory_reserved(),
-        }
-        del out
-        torch.cuda.synchronize()
-
-    labels = {impl: chr(ord("A") + i) for i, impl in enumerate(impls)}
-    records = {impl: [] for impl in impls}
-    for r in range(rounds):
-        order = impls if r % 2 == 0 else list(reversed(impls))
-        order_str = "".join(labels[i] for i in order)
-        recs = {
-            impl: {
-                "round_id": r,
-                "round_start_impl": labels[order[0]],
-                "order": order_str,
-                "fwd_wall_ms": [],
-                "bwd_wall_ms": [],
-                "fwd_bwd_wall_ms": [],
-                "fwd_cuda_event_ms": [],
-                "bwd_cuda_event_ms": [],
-                "fwd_nograd_wall_ms": [],
+            torch.cuda.synchronize(device)
+            mem[impl] = {
+                "allocated_before_bytes": before,
+                "peak_allocated_bytes": torch.cuda.max_memory_allocated(device),
+                "reserved_bytes": torch.cuda.memory_reserved(device),
             }
-            for impl in impls
-        }
-        for _ in range(samples):
-            for impl in order:
-                maybe_cold()
-                s = timed_sample(lambda: fwd(impl), q, k, v, g)
-                for key, val in s.items():
-                    recs[impl][key].append(val)
-        with torch.no_grad():
+            del out
+            torch.cuda.synchronize(device)
+
+        labels = {impl: chr(ord("A") + i) for i, impl in enumerate(impls)}
+        records = {impl: [] for impl in impls}
+        for r in range(rounds):
+            order = impls if r % 2 == 0 else list(reversed(impls))
+            order_str = "".join(labels[i] for i in order)
+            recs = {
+                impl: {
+                    "round_id": r,
+                    "round_start_impl": labels[order[0]],
+                    "order": order_str,
+                    "fwd_wall_ms": [],
+                    "bwd_wall_ms": [],
+                    "fwd_bwd_wall_ms": [],
+                    "fwd_cuda_event_ms": [],
+                    "bwd_cuda_event_ms": [],
+                    "fwd_nograd_wall_ms": [],
+                }
+                for impl in impls
+            }
             for _ in range(samples):
                 for impl in order:
                     maybe_cold()
-                    torch.cuda.synchronize()
-                    t0 = time.perf_counter()
-                    fwd(impl)
-                    torch.cuda.synchronize()
-                    t1 = time.perf_counter()
-                    recs[impl]["fwd_nograd_wall_ms"].append((t1 - t0) * 1e3)
-        cu_holder["cu"] = cu
-        for impl in impls:
-            records[impl].append(recs[impl])
-    return records, mem, labels
+                    s = timed_sample(lambda: fwd(impl), q, k, v, g, device)
+                    for key, val in s.items():
+                        recs[impl][key].append(val)
+            with torch.no_grad():
+                for _ in range(samples):
+                    for impl in order:
+                        maybe_cold()
+                        torch.cuda.synchronize(device)
+                        t0 = time.perf_counter()
+                        fwd(impl)
+                        torch.cuda.synchronize(device)
+                        t1 = time.perf_counter()
+                        recs[impl]["fwd_nograd_wall_ms"].append((t1 - t0) * 1e3)
+            cu_holder["cu"] = cu
+        return records, mem, labels
 
 
 def main():
@@ -237,10 +243,10 @@ def main():
                     f.write(json.dumps(line) + "\n")
         from statistics import median
 
+        # same statistic as summarize_results.py: median of per-round medians
         meds = {}
         for impl in impls:
-            flat = [x for rec in records[impl] for x in rec["fwd_bwd_wall_ms"]]
-            meds[impl] = median(flat)
+            meds[impl] = median(median(rec["fwd_bwd_wall_ms"]) for rec in records[impl])
         if len(impls) == 2:
             sp = meds[impls[0]] / meds[impls[1]]
             print(f"{cid}: {impls[0]} fwdbwd med={meds[impls[0]]:.3f} ms, {impls[1]} med={meds[impls[1]]:.3f} ms, paired speedup={sp:.3f}x")

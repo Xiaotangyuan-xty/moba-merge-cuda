@@ -1,15 +1,18 @@
 // CUDA kernels for route A (plan 4.7): atomic slot build + global-softmax merge.
 //
 // Semantics identical to the Triton reference (src/moba_opt/ops/merge_triton.py):
-//   build: slot = atomic ticket per global row p; stores masked by slot < kpad.
+//   build: slot = atomic ticket per global row p; stores masked by slot < kpad;
+//          overflow is counted and reported (never written out of bounds).
 //   merge: m = max_j l_j; w_j = exp(l_j - m); O = sum_j w_j o_j / z;
 //          z = sum_j w_j; L = m + log(z)   (plan 4.3)
 // One warp per query/head row; lanes cover D contiguously (coalesced).
 // All math in fp32 with accurate expf/logf (no fast-math); O cast back to the
-// input dtype; global LSE stays fp32.
+// input dtype; global LSE stays fp32. Launches run on the INPUT's device
+// (CUDAGuard), not whatever device happens to be current.
 
 #include <torch/extension.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <c10/cuda/CUDAGuard.h>
 #include <cuda_bf16.h>
 #include <cuda_fp16.h>
 #include <cstdint>
@@ -23,13 +26,20 @@ __global__ void build_slots_atomic_kernel(
     const int64_t* __restrict__ mapping,
     int* __restrict__ slots,
     int* __restrict__ counts,
+    int* __restrict__ overflow,
     const int64_t M,
     const int kpad) {
   const int64_t m = blockIdx.x * (int64_t)blockDim.x + threadIdx.x;
   if (m >= M) return;
   const int64_t p = mapping[m];
   const int slot = atomicAdd(&counts[p], 1);
-  if (slot < kpad) slots[p * kpad + slot] = (int)m;
+  if (slot < kpad) {
+    slots[p * kpad + slot] = (int)m;
+  } else if (overflow != nullptr) {
+    // capacity overflow: never write out of bounds; flag it so the launcher
+    // can raise instead of letting merge read uninitialized slots.
+    atomicAdd(overflow, 1);
+  }
 }
 
 template <typename T>
@@ -69,9 +79,12 @@ __global__ void merge_kernel(
 
   for (int64_t row = gwarp; row < P; row += stride) {
     const float l_self = self_lse[row];
-    const int cnt = counts[row];
+    // defensive: with check_capacity (or the structural bound of the official
+    // routing, counts <= topk-1 = kmax <= kpad) this never triggers; it only
+    // keeps an unchecked misuse from reading out of bounds.
+    const int cnt = min(counts[row], kpad);
 
-    // lane j (< cnt, cnt <= 8 <= 32) carries the j-th remote contribution
+    // lane j (< cnt, cnt <= kpad <= 8 <= 32) carries the j-th remote contribution
     float l_j = -INFINITY;
     int slot_j = 0;
     if (lane < cnt) {
@@ -144,8 +157,10 @@ std::vector<torch::Tensor> merge_forward_cuda(
     torch::Tensor remote_out,
     torch::Tensor remote_lse,
     torch::Tensor mapping,
-    int64_t kmax) {
+    int64_t kmax,
+    bool check_capacity) {
   TORCH_CHECK(self_out.is_cuda() && self_out.dim() == 3, "self_out must be CUDA [T,H,D]");
+  const at::cuda::CUDAGuard device_guard(self_out.device());
   const auto st = self_out.scalar_type();
   TORCH_CHECK(st == at::kFloat || st == at::kBFloat16 || st == at::kHalf,
               "self_out dtype must be fp32/bf16/fp16");
@@ -178,10 +193,19 @@ std::vector<torch::Tensor> merge_forward_cuda(
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   if (M > 0) {
+    auto overflow = check_capacity ? torch::zeros({1}, iopts) : torch::Tensor();
     const int64_t blocks = (M + kBuildThreads - 1) / kBuildThreads;
     build_slots_atomic_kernel<<<blocks, kBuildThreads, 0, stream>>>(
-        mapping_c.data_ptr<int64_t>(), slots.data_ptr<int>(), counts.data_ptr<int>(), M, kpad);
+        mapping_c.data_ptr<int64_t>(), slots.data_ptr<int>(), counts.data_ptr<int>(),
+        check_capacity ? overflow.data_ptr<int>() : nullptr, M, kpad);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
+    if (check_capacity) {
+      // synchronizes the current stream of the input device (guard above)
+      TORCH_CHECK(overflow.cpu().item<int>() == 0,
+                  "capacity exceeded: a query row has more remote contributions than ",
+                  "kmax allows (slots kpad=", kpad, "); refusing to merge with a ",
+                  "partially filled slot table");
+    }
   }
 
   const float* sl = self_lse_c.data_ptr<float>();

@@ -29,12 +29,13 @@ def ext():
     return _EXT
 
 
-def merge_forward_cuda(self_out, self_lse, remote_out, remote_lse, mapping, kmax=None):
+def merge_forward_cuda(self_out, self_lse, remote_out, remote_lse, mapping, kmax=None, check_capacity=True):
     """Same contract as merge_triton.merge_forward (atomic build included).
 
     self_out [T,H,D] (fp32/bf16/fp16, CUDA); self_lse [T,H] fp32;
     remote_out [M,1,D] or [M,D]; remote_lse [M] fp32; mapping [M] int64.
-    Returns (O [T,H,D] input dtype, LSE [T,H] fp32).
+    check_capacity=True makes the slot build raise on capacity overflow
+    (one small device->host sync per call). Returns (O, LSE fp32).
     """
     if kmax is None:
         P = self_out.shape[0] * self_out.shape[1]
@@ -49,5 +50,6 @@ def merge_forward_cuda(self_out, self_lse, remote_out, remote_lse, mapping, kmax
         remote_lse.to(torch.float32),
         mapping.to(torch.int64).reshape(-1),
         int(kmax),
+        bool(check_capacity),
     )
     return out, lse

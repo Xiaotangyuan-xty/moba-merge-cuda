@@ -69,6 +69,7 @@ def main():
     ap.add_argument("--out-dir", default=str(ROOT / "results" / "raw" / "merge_fixtures"))
     args = ap.parse_args()
 
+    torch.cuda.set_device(torch.device(args.device))
     doc = yaml.safe_load(Path(args.config).read_text())
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)

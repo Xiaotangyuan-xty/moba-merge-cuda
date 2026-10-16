@@ -159,6 +159,7 @@ def main():
     args = ap.parse_args()
 
     device = torch.device(args.device)
+    torch.cuda.set_device(device)
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)

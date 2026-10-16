@@ -100,9 +100,19 @@ def test_repeat_calls_bounded_fluctuation():
     so, sl, ro, rl, mp = synth(counts, seed=16)
     out0, lse0 = run(so, sl, ro, rl, mp, kmax=4)
     out1, lse1 = run(so, sl, ro, rl, mp, kmax=4)
-    # atomic ticket order is arbitrary (same as the Triton atomic builder)
+    # atomic ticket order is arbitrary: lane-level accumulation order may vary
+    # between runs; repeated runs must stay within this explicit tolerance
+    # (semantics preserved, no bitwise guarantee -- plan 7.4 last row).
     assert torch.allclose(out0, out1, atol=1e-6, rtol=1e-5)
     assert torch.allclose(lse0, lse1, atol=1e-6, rtol=1e-5)
+
+
+def test_cuda_capacity_overflow_raises():
+    # counts exceed kpad -> the launcher must raise (TORCH_CHECK), never read
+    # uninitialized slots.
+    so, sl, ro, rl, mp = synth([3, 0], seed=6)
+    with pytest.raises(RuntimeError, match="capacity exceeded"):
+        run(so, sl, ro, rl, mp, kmax=2)
 
 
 def test_cuda_matches_triton():

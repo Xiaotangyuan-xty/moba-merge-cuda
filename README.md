@@ -1,6 +1,6 @@
 # MoBA 稀疏 Attention GPU 优化（moba-opt）
 
-状态：完成。**主结果**：CUDA 全局 softmax 合并替换官方 PyTorch 合并路径，单 A40 上完整 Attention 前向 1.07–1.38×、前反向合计 1.064–1.129×（24 组配对几何平均 1.088×），127 项测试全过，选块与官方逐位一致。技术报告：`docs/report.md`。
+状态：完成（经一轮外部审查修订）。**主结果**：CUDA 全局 softmax 合并替换官方 PyTorch 合并路径，单 A40 上完整 Attention 前向提速 1.120–1.457×、前反向合计 1.067–1.129×（24 组配对几何平均 1.088×；统计口径：轮中位数的跨轮中位数），127 项测试全过，选块与官方逐位一致。显存对比结论因测量缺陷已撤回待重测。技术报告：`docs/report.md`。
 
 - 上游固定版本：MoonshotAI/MoBA @ `b5d58363311d3ca946f1ec444182727c15e338b5`（`third_party/UPSTREAM_SHA.txt`，third_party 不入库、零改动）
 - 机器：共享节点 gpu-node1，3× NVIDIA A40 48GB（CC 8.6，driver 580.95.05）
@@ -41,9 +41,10 @@ results/               # 原始 JSONL、trace、fixture、汇总（不入库）
 ```bash
 source scripts/env.sh
 python scripts/check_environment.py    # 1) 环境证据采集（CPU 安全）
-bash scripts/smoke.sh                  # 2) 接口探针 + 官方 324 例（GPU）
-python -m pytest tests/ -q             #    本项目 127 项（GPU）
-# 3) 核心性能复现（GPU）
+bash scripts/gen_test_fixtures.sh      # 2) 生成测试 fixture（GPU；tests/ 依赖，不入库；缺失时相关测试干净跳过）
+bash scripts/smoke.sh                  # 3) 接口探针 + 官方 324 例（GPU）
+python -m pytest tests/ -q             #    本项目测试（GPU）
+# 4) 核心性能复现（GPU）
 python benchmarks/benchmark_attention.py --config configs/core12.yaml \
   --ids C01,C02,C03,C04,C05,C06,C07,C08,C09,C10,C11,C12 \
   --impl official,opt_merge_cuda --rounds 5 --samples 30 --warmup 20 \

@@ -44,6 +44,7 @@ def main():
     from moba.moba_efficient import moba_attn_varlen
 
     device = torch.device(args.device)
+    torch.cuda.set_device(device)
     results = []
     for path in sorted(Path().glob(args.routes)):
         payload = torch.load(path, map_location="cpu", weights_only=False)

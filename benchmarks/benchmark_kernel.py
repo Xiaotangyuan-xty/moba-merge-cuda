@@ -141,6 +141,7 @@ def main():
     args = ap.parse_args()
 
     device = torch.device(args.device)
+    torch.cuda.set_device(device)
 
     if args.check_fixture:
         fx = torch.load(args.check_fixture, map_location="cpu", weights_only=False)
