@@ -41,3 +41,29 @@ def merge_vjp_reference(branches, merged_o, merged_lse, g, compute_dtype=torch.f
     d_os = [alpha[j].unsqueeze(-1) * g for j in range(len(branches))]
     d_ls = [alpha[j] * (g * (os_[j] - merged_o)).sum(dim=-1) for j in range(len(branches))]
     return d_os, d_ls
+
+
+def merge_grouped_reference(self_out, self_lse, remote_out, remote_lse, mapping, compute_dtype=torch.float64):
+    """Row-wise merge_reference over groups p = 0..P-1 (p = s*H + h).
+
+    self_out [P,D], self_lse [P]; remote_out [M,D], remote_lse [M];
+    mapping [M] (remote row -> p). Returns O [P,D], L [P] in compute_dtype on CPU.
+    """
+    so = self_out.detach().to(device="cpu", dtype=compute_dtype).reshape(self_out.shape[0], -1)
+    sl = self_lse.detach().to(device="cpu", dtype=compute_dtype).reshape(-1)
+    ro = remote_out.detach().to(device="cpu", dtype=compute_dtype).reshape(-1, so.shape[1])
+    rl = remote_lse.detach().to(device="cpu", dtype=compute_dtype).reshape(-1)
+    mapping = mapping.detach().to(device="cpu", dtype=torch.long).reshape(-1)
+    P, D = so.shape
+    groups = {}
+    for m, p in enumerate(mapping.tolist()):
+        groups.setdefault(p, []).append(m)
+    O = torch.empty(P, D, dtype=compute_dtype)
+    L = torch.empty(P, dtype=compute_dtype)
+    for p in range(P):
+        branches = [(so[p].unsqueeze(0), sl[p].reshape(1))]
+        branches += [(ro[m].unsqueeze(0), rl[m].reshape(1)) for m in groups.get(p, [])]
+        o_row, l_row = merge_reference(branches, compute_dtype=compute_dtype)
+        O[p] = o_row[0]
+        L[p] = l_row[0]
+    return O, L
