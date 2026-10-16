@@ -1,0 +1,25 @@
+defaults:
+  dtype: bfloat16
+  batch: 1
+  causal: true
+  dropout: 0.0
+  metadata_mode: warm_immutable_tensor
+
+# 方案 9.2 补充实验：逐个变量改变，不做笛卡尔积。
+configs:
+  # FP16 短/中/长代表
+  F03S: {total_tokens: 2048,  heads: 8, head_dim: 64,  chunk_size: 512, topk: 4, dtype: float16}
+  F07M: {total_tokens: 8192,  heads: 8, head_dim: 128, chunk_size: 512, topk: 4, dtype: float16}
+  F12L: {total_tokens: 32768, heads: 8, head_dim: 128, chunk_size: 512, topk: 4, dtype: float16}
+  # 块长 C 扫描（C08 形状）
+  CH128:  {total_tokens: 8192, heads: 8, head_dim: 128, chunk_size: 128, topk: 4}
+  CH256:  {total_tokens: 8192, heads: 8, head_dim: 128, chunk_size: 256, topk: 4}
+  CH1024: {total_tokens: 8192, heads: 8, head_dim: 128, chunk_size: 1024, topk: 4}
+  # top-k 扫描（C08 形状）
+  K2: {total_tokens: 8192, heads: 8, head_dim: 128, chunk_size: 512, topk: 2}
+  K8: {total_tokens: 8192, heads: 8, head_dim: 128, chunk_size: 512, topk: 8}
+  # ragged batch（T=8192 固定，不均匀划分）
+  RB4: {total_tokens: 8192, heads: 8, head_dim: 128, chunk_size: 512, topk: 4, seq_lens: [1024, 2048, 5120]}
+  RB8: {total_tokens: 8192, heads: 8, head_dim: 128, chunk_size: 512, topk: 4, seq_lens: [512, 512, 1024, 1024, 1024, 1536, 1024, 1536]}
+  # 尾块
+  TAIL: {total_tokens: 8193, heads: 8, head_dim: 128, chunk_size: 512, topk: 4}

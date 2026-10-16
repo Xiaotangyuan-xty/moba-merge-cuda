@@ -47,3 +47,23 @@ def official_attn_varlen(q, k, v, cu_seqlens, max_seqlen, config):
 
 
 register("official", official_attn_varlen)
+
+
+def official_nvtx(q, k, v, cu_seqlens, max_seqlen, config):
+    """V1 ablation seat (plan 9.3): the record_function-marked diagnostic copy,
+    numerically identical to the frozen baseline (verified bitwise on C01)."""
+    _validate(q, k, v, cu_seqlens)
+    from moba_opt.diagnostic import moba_attn_varlen as diag_impl
+
+    return diag_impl(
+        q,
+        k,
+        v,
+        cu_seqlens,
+        int(max_seqlen),
+        moba_chunk_size=int(config["chunk_size"]),
+        moba_topk=int(config["topk"]),
+    )
+
+
+register("official_nvtx", official_nvtx)

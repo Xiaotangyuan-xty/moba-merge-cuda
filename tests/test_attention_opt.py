@@ -215,3 +215,40 @@ def test_invalid_inputs_rejected(bad):
     bq, bk, bv, bcu = bad(q, k, v, cu)
     with pytest.raises((ValueError, AssertionError, RuntimeError)):
         run_impl("opt_merge_atomic", bq, bk, bv, bcu, ml, {"chunk_size": 128, "topk": 2})
+
+
+SUPP = [
+    dict(total_tokens=8192, heads=8, head_dim=128, chunk_size=128, topk=4),
+    dict(total_tokens=8192, heads=8, head_dim=128, chunk_size=1024, topk=4),
+    dict(total_tokens=8192, heads=8, head_dim=128, chunk_size=512, topk=2),
+    dict(total_tokens=8192, heads=8, head_dim=128, chunk_size=512, topk=8),
+    dict(total_tokens=8192, heads=8, head_dim=128, chunk_size=512, topk=4, lens=[1024, 2048, 5120]),
+    dict(total_tokens=8193, heads=8, head_dim=128, chunk_size=512, topk=4),
+    dict(total_tokens=2048, heads=8, head_dim=64, chunk_size=512, topk=4, dtype=torch.float16),
+]
+
+
+@pytest.mark.parametrize(
+    "d", SUPP, ids=lambda d: f"C{d['chunk_size']}K{d['topk']}T{d['total_tokens']}{'fp16' if d.get('dtype') == torch.float16 else ''}{'ragged' if d.get('lens') else ''}"
+)
+def test_supplementary_shapes_vs_official(d):
+    dtype = d.get("dtype", torch.bfloat16)
+    q, k, v, cu, ml = gen(d["total_tokens"], d["heads"], d["head_dim"], seed=23, lens=d.get("lens"), dtype=dtype)
+    cfg = cfg_of(d)
+    g = torch.randn_like(q)
+    grads = {}
+    outs = {}
+    for impl in ("official", "opt_merge_atomic"):
+        for t in (q, k, v):
+            t.grad = None
+            t.requires_grad_(True)
+        o = run_impl(impl, q, k, v, cu, ml, cfg)
+        outs[impl] = o
+        grads[impl] = torch.autograd.grad(o, (q, k, v), grad_outputs=g)
+    for t in (q, k, v):
+        t.requires_grad_(False)
+    mx, mn = err(outs["official"], outs["opt_merge_atomic"])
+    assert mx < 2e-2 and mn < 1e-3, f"fwd max={mx} mean={mn}"
+    for name, a, b in zip(("dq", "dk", "dv"), grads["official"], grads["opt_merge_atomic"]):
+        mx, mn = err(a, b)
+        assert mx < 4e-2 and mn < 4e-4, f"{name} max={mx} mean={mn}"
