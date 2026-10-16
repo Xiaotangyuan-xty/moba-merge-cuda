@@ -20,6 +20,12 @@ from torch.autograd.profiler import record_function
 # sets after routing. None in all performance paths.
 ROUTE_HOOK = None
 
+# Test-only hook (scripts/dump_merge_fixtures.py): called as
+# MERGE_HOOK("inputs", {...}) right after the LSE transposes and
+# MERGE_HOOK("outputs", {...}) at the end of forward. Tensors are the real
+# merge-stage values; hooks must clone. None in all performance paths.
+MERGE_HOOK = None
+
 
 @lru_cache(maxsize=16)
 def calc_chunks(cu_seqlen, moba_chunk_size):
@@ -132,6 +138,18 @@ class MixedAttention(torch.autograd.Function):
             self_attn_lse_sh = self_attn_lse_hs.t().contiguous()
             moba_attn_lse = moba_attn_lse_hs.t().contiguous()
 
+            if MERGE_HOOK is not None:
+                MERGE_HOOK(
+                    "inputs",
+                    {
+                        "self_out": self_attn_out_sh,
+                        "self_lse": self_attn_lse_sh,
+                        "remote_out": moba_attn_out,
+                        "remote_lse": moba_attn_lse,
+                        "mapping": moba_q_sh_indices,
+                    },
+                )
+
             # output buffer [S, H, D], same shape as q
             output = torch.zeros(
                 (q.shape[0], q.shape[1], q.shape[2]), device=q.device, dtype=torch.float32
@@ -179,6 +197,11 @@ class MixedAttention(torch.autograd.Function):
             output = output.to(q.dtype)
             # add back max lse
             mixed_attn_lse_sh = mixed_attn_lse_sh + max_lse_1d.view_as(mixed_attn_se_sh)
+            if MERGE_HOOK is not None:
+                MERGE_HOOK(
+                    "outputs",
+                    {"output": output, "mixed_lse": mixed_attn_lse_sh},
+                )
         ctx.save_for_backward(
             output,
             mixed_attn_lse_sh,
