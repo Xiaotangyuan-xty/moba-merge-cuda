@@ -188,3 +188,49 @@ def test_slots_deterministic_and_counts():
     # global row indices covered exactly once
     valid = slots[slots >= 0].long()
     assert sorted(valid.tolist()) == list(range(mp.numel()))
+
+
+def test_atomic_builder_slot_sets_and_counts():
+    import triton
+
+    from moba_opt.ops.merge_triton import _build_slots_atomic_kernel
+
+    counts = [2, 0, 3, 1, 2]
+    _, _, _, _, mp = synth(counts, seed=13)
+    P, kmax, kpad = len(counts), 4, 4
+    slots_t, _ = build_slots_torch(mp, P, kmax, kpad=kpad)
+    slots_a = torch.empty((P, kpad), dtype=torch.int32, device="cuda")
+    cnt_a = torch.zeros(P, dtype=torch.int32, device="cuda")
+    _build_slots_atomic_kernel[(triton.cdiv(mp.numel(), 256),)](
+        mp, slots_a, cnt_a, mp.numel(), KPAD=kpad, BLOCK=256
+    )
+    assert cnt_a.tolist() == counts
+    for p, c in enumerate(counts):
+        assert sorted(slots_a[p, :c].tolist()) == sorted(x for x in slots_t[p].tolist() if x >= 0)
+
+
+def test_atomic_merge_matches_torch_builder():
+    counts = [0, 1, 2, 3, 1, 0, 2, 5, 3, 1]
+    so, sl, ro, rl, mp = synth(counts, seed=14)
+    out_t, lse_t = run(so, sl, ro, rl, mp, kmax=8, builder="torch")
+    out_a, lse_a = run(so, sl, ro, rl, mp, kmax=8, builder="atomic")
+    assert torch.allclose(out_t, out_a, atol=1e-6, rtol=1e-5)
+    assert torch.allclose(lse_t, lse_a, atol=1e-6, rtol=1e-5)
+
+
+def test_atomic_vs_fp64():
+    counts = [3, 1, 2, 0, 3, 1]
+    so, sl, ro, rl, mp = synth(counts, seed=15)
+    out, lse = run(so, sl, ro, rl, mp, builder="atomic")
+    check_vs_fp64(out, lse, (so, sl, ro, rl, mp))
+
+
+def test_atomic_repeat_fluctuation_bounded():
+    counts = [1, 2, 0, 3, 2, 1]
+    so, sl, ro, rl, mp = synth(counts, seed=16)
+    out0, lse0 = run(so, sl, ro, rl, mp, kmax=4, builder="atomic")
+    out1, lse1 = run(so, sl, ro, rl, mp, kmax=4, builder="atomic")
+    # atomic assignment order is arbitrary: lane-level accumulation order may
+    # change between runs; fluctuation must stay at fp32-ulp scale (plan 7.4).
+    assert torch.allclose(out0, out1, atol=1e-6, rtol=1e-5)
+    assert torch.allclose(lse0, lse1, atol=1e-6, rtol=1e-5)
