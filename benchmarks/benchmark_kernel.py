@@ -32,6 +32,7 @@ from moba_opt.ops.merge_triton import (  # noqa: E402
     _merge_kernel,
     build_slots_torch,
 )
+from moba_opt.ops.merge_cuda import merge_forward_cuda  # noqa: E402
 
 DTYPES = {"bfloat16": torch.bfloat16, "float16": torch.float16}
 
@@ -202,11 +203,19 @@ def main():
             )
             _merge_kernel[(P,)](so, sl, ro, rl, slots_a, counts_a, out_buf, lse_buf, D=D, KPAD=kpad, num_warps=4)
 
+        sl_3d = inp["self_lse_hs"].t().contiguous()
+
+        def run_stage_cuda():
+            merge_forward_cuda(
+                inp["self_out"], sl_3d, inp["remote_out"], rl, inp["mapping"], kmax=kmax
+            )
+
         variants = {
             "official_stage": run_official,
             "triton_kernel": run_kernel,
             "triton_stage_torchmap": run_stage_torch,
             "triton_stage_atomic": run_stage_atomic,
+            "cuda_stage": run_stage_cuda,
         }
 
         for name, fn in variants.items():

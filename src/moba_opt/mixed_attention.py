@@ -29,6 +29,12 @@ from .ops.merge_triton import merge_forward
 
 ROUTE_HOOK = None  # test-only; None in all performance paths
 
+# merge backends for OptMixedAttention: 0 = Triton (atomic slot build),
+# 1 = CUDA extension (ops/merge.cu). Passed explicitly per call so both can
+# run in one process for paired benchmarks.
+MERGE_BACKEND_TRITON = 0
+MERGE_BACKEND_CUDA = 1
+
 
 class OptMixedAttention(torch.autograd.Function):
 
@@ -47,6 +53,7 @@ class OptMixedAttention(torch.autograd.Function):
         moba_chunk_size,
         moba_q_sh_indices,
         moba_topk,
+        merge_backend,
     ):
         ctx.max_seqlen = max_seqlen
         ctx.moba_chunk_size = moba_chunk_size
@@ -82,16 +89,28 @@ class OptMixedAttention(torch.autograd.Function):
             dropout_p=0.0,
         )
 
-        # replaced stage: global-softmax merge via Triton (plan 4.3 math)
-        output, mixed_attn_lse_sh = merge_forward(
-            self_attn_out_sh,
-            self_attn_lse_hs.t().contiguous(),
-            moba_attn_out,
-            moba_attn_lse_hs.reshape(-1),
-            moba_q_sh_indices,
-            kmax=moba_topk,
-            builder="atomic",
-        )
+        # replaced stage: global-softmax merge (plan 4.3 math), Triton or CUDA
+        if merge_backend == MERGE_BACKEND_CUDA:
+            from .ops.merge_cuda import merge_forward_cuda
+
+            output, mixed_attn_lse_sh = merge_forward_cuda(
+                self_attn_out_sh,
+                self_attn_lse_hs.t().contiguous(),
+                moba_attn_out,
+                moba_attn_lse_hs.reshape(-1),
+                moba_q_sh_indices,
+                kmax=moba_topk,
+            )
+        else:
+            output, mixed_attn_lse_sh = merge_forward(
+                self_attn_out_sh,
+                self_attn_lse_hs.t().contiguous(),
+                moba_attn_out,
+                moba_attn_lse_hs.reshape(-1),
+                moba_q_sh_indices,
+                kmax=moba_topk,
+                builder="atomic",
+            )
 
         ctx.save_for_backward(
             output,
@@ -192,7 +211,7 @@ class OptMixedAttention(torch.autograd.Function):
         )
 
         dmkv = torch.stack((dmk, dmv), dim=1)
-        return dq, dk, dv, None, dmq, dmkv, None, None, None, None, None, None
+        return dq, dk, dv, None, dmq, dmkv, None, None, None, None, None, None, None
 
 
 def moba_attn_varlen_opt(
@@ -203,6 +222,7 @@ def moba_attn_varlen_opt(
     max_seqlen: int,
     moba_chunk_size: int,
     moba_topk: int,
+    merge_backend: int = MERGE_BACKEND_TRITON,
 ) -> torch.Tensor:
     """Same interface and routing as upstream moba_attn_varlen; only the
     forward merge stage and the MixedAttention class differ."""
@@ -359,10 +379,11 @@ def moba_attn_varlen_opt(
         moba_chunk_size,
         moba_q_sh_indices,
         moba_topk,
+        merge_backend,
     )
 
 
-def opt_merge_atomic(q, k, v, cu_seqlens, max_seqlen, config):
+def _opt_adapter(q, k, v, cu_seqlens, max_seqlen, config, merge_backend):
     _validate(q, k, v, cu_seqlens)
     return moba_attn_varlen_opt(
         q,
@@ -372,7 +393,17 @@ def opt_merge_atomic(q, k, v, cu_seqlens, max_seqlen, config):
         int(max_seqlen),
         moba_chunk_size=int(config["chunk_size"]),
         moba_topk=int(config["topk"]),
+        merge_backend=merge_backend,
     )
 
 
+def opt_merge_atomic(q, k, v, cu_seqlens, max_seqlen, config):
+    return _opt_adapter(q, k, v, cu_seqlens, max_seqlen, config, MERGE_BACKEND_TRITON)
+
+
+def opt_merge_cuda(q, k, v, cu_seqlens, max_seqlen, config):
+    return _opt_adapter(q, k, v, cu_seqlens, max_seqlen, config, MERGE_BACKEND_CUDA)
+
+
 register("opt_merge_atomic", opt_merge_atomic)
+register("opt_merge_cuda", opt_merge_cuda)
