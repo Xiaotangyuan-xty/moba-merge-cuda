@@ -1,0 +1,16 @@
+defaults:
+  dtype: bfloat16
+  batch: 1
+  causal: true
+  dropout: 0.0
+  metadata_mode: warm_immutable_tensor
+
+# 小规模冒烟配置：覆盖 D=64/128、单块/多块/尾块、K=1 fallback 与常规稀疏。
+configs:
+  S01: {total_tokens: 512,  heads: 1, head_dim: 64,  chunk_size: 128, topk: 2}
+  S02: {total_tokens: 1024, heads: 2, head_dim: 64,  chunk_size: 256, topk: 3}
+  S03: {total_tokens: 1024, heads: 2, head_dim: 128, chunk_size: 256, topk: 3}
+  S04: {total_tokens: 2048, heads: 4, head_dim: 128, chunk_size: 512, topk: 4}
+  S05: {total_tokens: 2049, heads: 2, head_dim: 64,  chunk_size: 512, topk: 2}   # 尾块 +1
+  S06: {total_tokens: 1024, heads: 2, head_dim: 64,  chunk_size: 512, topk: 1}   # K=1 fallback 分支
+  S07: {total_tokens: 300,  heads: 1, head_dim: 64,  chunk_size: 512, topk: 4}   # 序列不足一块 -> fallback

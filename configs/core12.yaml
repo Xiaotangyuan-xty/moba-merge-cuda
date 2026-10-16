@@ -1,0 +1,23 @@
+defaults:
+  dtype: bfloat16
+  batch: 1
+  chunk_size: 512
+  topk: 4
+  causal: true
+  dropout: 0.0
+  metadata_mode: warm_immutable_tensor
+
+# 方案 9.1：12 个预先确定的核心性能配置。T 为总 token 数（B=1 即单序列长度）。
+configs:
+  C01: {total_tokens: 2048,  heads: 1, head_dim: 64}
+  C02: {total_tokens: 2048,  heads: 1, head_dim: 128}
+  C03: {total_tokens: 2048,  heads: 8, head_dim: 64}
+  C04: {total_tokens: 2048,  heads: 8, head_dim: 128}
+  C05: {total_tokens: 8192,  heads: 1, head_dim: 64}
+  C06: {total_tokens: 8192,  heads: 1, head_dim: 128}
+  C07: {total_tokens: 8192,  heads: 8, head_dim: 64}
+  C08: {total_tokens: 8192,  heads: 8, head_dim: 128}
+  C09: {total_tokens: 32768, heads: 1, head_dim: 64}
+  C10: {total_tokens: 32768, heads: 1, head_dim: 128}
+  C11: {total_tokens: 32768, heads: 8, head_dim: 64}
+  C12: {total_tokens: 32768, heads: 8, head_dim: 128}
