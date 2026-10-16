@@ -170,6 +170,8 @@ def measure(impls, cfg, device, rounds, samples, warmup, seed, metadata="warm"):
                         t1 = time.perf_counter()
                         recs[impl]["fwd_nograd_wall_ms"].append((t1 - t0) * 1e3)
             cu_holder["cu"] = cu
+            for impl in impls:
+                records[impl].append(recs[impl])
         return records, mem, labels
 
 
