@@ -22,14 +22,17 @@ RESULTS = []
 
 def probe(name):
     def deco(fn):
-        try:
-            detail = fn() or {}
-            RESULTS.append({"name": name, "status": "PASS", **detail})
-            print(f"PASS {name} {detail.get('note', '')}")
-        except Exception:  # noqa: BLE001
-            RESULTS.append({"name": name, "status": "FAIL", "traceback": traceback.format_exc()})
-            print(f"FAIL {name}")
-            traceback.print_exc()
+        def wrapper():
+            try:
+                detail = fn() or {}
+                RESULTS.append({"name": name, "status": "PASS", **detail})
+                print(f"PASS {name} {detail.get('note', '')}")
+            except Exception:  # noqa: BLE001
+                RESULTS.append({"name": name, "status": "FAIL", "traceback": traceback.format_exc()})
+                print(f"FAIL {name}")
+                traceback.print_exc()
+
+        return wrapper
 
     return deco
 
@@ -142,7 +145,6 @@ def p_k1():
 
 
 def main():
-    main.p = None
     print("probing on", torch.cuda.get_device_name(0))
     for fn in (p_versions, p_signatures, p_public, p_private_fwd, p_moba, p_k1):
         fn()
