@@ -16,6 +16,10 @@ from functools import lru_cache
 from einops import rearrange
 from torch.autograd.profiler import record_function
 
+# Test-only hook (reference/export_route.py): called with the selected block
+# sets after routing. None in all performance paths.
+ROUTE_HOOK = None
+
 
 @lru_cache(maxsize=16)
 def calc_chunks(cu_seqlen, moba_chunk_size):
@@ -389,6 +393,14 @@ def moba_attn_varlen(
         gate_idx_mask = torch.zeros(gate_mask.shape, dtype=torch.bool, device=q.device)
         gate_idx_mask = gate_idx_mask.scatter_(dim=0, index=gate_top_k_idx, value=True)
         gate_mask = torch.logical_and(gate_mask, gate_idx_mask)
+
+    if ROUTE_HOOK is not None:
+        ROUTE_HOOK(
+            cu_chunk=cu_chunk,
+            filtered_chunk_indices=filtered_chunk_indices,
+            chunk_to_batch=chunk_to_batch,
+            selected=gate_mask,
+        )
 
     with record_function("stage5_pack_qkv"):
         # varlen trick: combining all q index that needs moba attn
