@@ -3,9 +3,9 @@
 状态：完成（经一轮外部审查修订）。**主结果**：CUDA 全局 softmax 合并替换官方 PyTorch 合并路径，单 A40 上完整 Attention 前向提速 1.123–1.455×、前反向合计 1.062–1.129×（24 组配对几何平均 1.088×；统计口径：轮中位数的跨轮中位数），反向不变，峰值显存持平（独立进程复测），129 项测试全过，选块与官方逐位一致。技术报告：`docs/report.md`。
 
 - 上游固定版本：MoonshotAI/MoBA @ `b5d58363311d3ca946f1ec444182727c15e338b5`（`third_party/UPSTREAM_SHA.txt`，third_party 不入库、零改动）
-- 机器：共享节点 gpu-node1，3× NVIDIA A40 48GB（CC 8.6，driver 580.95.05）
-- 环境：conda `/mnt/sda1/taig/envs/moba-opt`（Python 3.10 + torch 2.4.0+cu121 + flash-attn 2.6.3 源码编译 + triton 3.0.0）；锁定清单 `environment.lock.txt`
-- 所有代码、原始数据、报告均保存在服务器 `/mnt/sda1/taig/moba-opt/`，git 仅本地
+- 硬件：单张 NVIDIA A40 48GB（CC 8.6，driver 580.95.05，共享节点）
+- 环境：Python 3.10 + torch 2.4.0+cu121 + flash-attn 2.6.3（源码编译）+ triton 3.0.0；锁定清单 `environment.lock.txt`；机器相关路径由 `scripts/env.local.sh` 覆盖（不入库）
+- 原始数据（`results/`）不入库；汇总由 `scripts/summarize_results.py` 从原始 JSONL 重新生成
 
 ## GPU 使用纪律（共享节点）
 

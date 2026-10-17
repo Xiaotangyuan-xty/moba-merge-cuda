@@ -1,6 +1,6 @@
 # MoBA 稀疏 Attention GPU 优化：技术报告
 
-日期：2026-10-16（同日经一轮外部审查后修订）。机器：gpu-node1 单张 NVIDIA A40 48GB（CC 8.6，driver 580.95.05）。
+日期：2026-10-16（同日经一轮外部审查后修订）。机器：单张 NVIDIA A40 48GB（CC 8.6，driver 580.95.05，共享节点）。
 上游：MoonshotAI/MoBA @ `b5d58363311d3ca946f1ec444182727c15e338b5`（冻结，零改动；`third_party/UPSTREAM_SHA.txt`）。
 环境：Python 3.10.22 / torch 2.4.0+cu121 / flash-attn 2.6.3（源码编译，nvcc 12.9）/ 自研 CUDA 扩展（sm_86，无 fast-math）。完整锁定：`environment.lock.txt`。
 
