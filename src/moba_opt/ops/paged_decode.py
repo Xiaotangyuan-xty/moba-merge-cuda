@@ -16,9 +16,9 @@ def _append_kernel(K, V, KC, VC, TABLE, IDS, POS,
     d = tl.arange(0, DP)
     sid = tl.load(IDS + token)
     pos = tl.load(POS + token)
-    physical = tl.load(TABLE + sid * WIDTH + pos // PAGE)
-    dst = ((physical * PAGE + pos % PAGE) * HK + head) * D + d
-    src = (token * HK + head) * D + d
+    physical = tl.load(TABLE + sid.to(tl.int64) * WIDTH + pos // PAGE)
+    dst = ((physical.to(tl.int64) * PAGE + pos % PAGE) * HK + head) * D + d
+    src = (token.to(tl.int64) * HK + head) * D + d
     tl.store(KC + dst, tl.load(K + src, mask=d < D, other=0), mask=d < D)
     tl.store(VC + dst, tl.load(V + src, mask=d < D, other=0), mask=d < D)
 
@@ -36,11 +36,11 @@ def _closed_means_kernel(KC, TABLE, MEANS, IDS, CHUNKS,
     token = chunk * C + tl.arange(0, CP)
     d = feature_tile * 32 + tl.arange(0, 32)
     valid_t = tl.arange(0, CP) < C
-    physical = tl.load(TABLE + sid * WIDTH + token // PAGE, mask=valid_t, other=0)
-    address = ((physical * PAGE + token % PAGE)[:, None] * HK + head) * D + d[None, :]
+    physical = tl.load(TABLE + sid.to(tl.int64) * WIDTH + token // PAGE, mask=valid_t, other=0)
+    address = ((physical.to(tl.int64) * PAGE + token % PAGE)[:, None] * HK + head) * D + d[None, :]
     keys = tl.load(KC + address, mask=valid_t[:, None] & (d[None, :] < D), other=0).to(tl.float32)
     means = tl.sum(keys, axis=0) / C
-    dst = ((sid * MAX_CHUNKS + chunk) * HK + head) * D + d
+    dst = ((sid.to(tl.int64) * MAX_CHUNKS + chunk) * HK + head) * D + d
     tl.store(MEANS + dst, means, mask=d < D)
 
 
@@ -57,11 +57,11 @@ def _route_kernel(Q, MEANS, CAND_SID, CAND_CHUNK, QSID, QPOS, SCORES,
     legal = (sid == qsid) & ((chunk + 1) * C <= pos)
     d = tl.arange(0, DP)
     kvhead = head // (HQ // HK)
-    q = tl.load(Q + (query * HQ + head) * D + d, mask=legal & (d < D), other=0).to(tl.float32)
-    mean = tl.load(MEANS + ((sid * MAX_CHUNKS + chunk) * HK + kvhead) * D + d,
+    q = tl.load(Q + (query.to(tl.int64) * HQ + head) * D + d, mask=legal & (d < D), other=0).to(tl.float32)
+    mean = tl.load(MEANS + ((sid.to(tl.int64) * MAX_CHUNKS + chunk) * HK + kvhead) * D + d,
                    mask=legal & (d < D), other=0).to(tl.float32)
     score = tl.sum(q * mean, axis=0)
-    tl.store(SCORES + (candidate * HQ + head) * NQ + query,
+    tl.store(SCORES + (candidate.to(tl.int64) * HQ + head) * NQ + query,
              tl.where(legal, score, -float("inf")))
 
 
@@ -76,7 +76,7 @@ def _attention_kernel(Q, KC, VC, TABLE, LENGTHS, QSID, QPOS, SELECTED, OUT, LSE,
     length = tl.load(LENGTHS + sid)
     kvhead = head // (HQ // HK)
     d = tl.arange(0, DP)
-    q = tl.load(Q + (query * HQ + head) * D + d, mask=d < D, other=0).to(tl.float32)
+    q = tl.load(Q + (query.to(tl.int64) * HQ + head) * D + d, mask=d < D, other=0).to(tl.float32)
     m = tl.full((), -float("inf"), tl.float32)
     z = tl.full((), 0, tl.float32)
     acc = tl.full((DP,), 0, tl.float32)
@@ -91,12 +91,12 @@ def _attention_kernel(Q, KC, VC, TABLE, LENGTHS, QSID, QPOS, SELECTED, OUT, LSE,
         else:
             slot = iteration // tl.cdiv(C, BT)
             tile = iteration % tl.cdiv(C, BT)
-            chunk = tl.load(SELECTED + (query * HQ + head) * SLOTS + slot)
+            chunk = tl.load(SELECTED + (query.to(tl.int64) * HQ + head) * SLOTS + slot)
             within = tile * BT + tl.arange(0, BT)
             token = chunk * C + within
             valid = (chunk >= 0) & (within < C) & (token <= pos) & (token < length)
-        physical = tl.load(TABLE + sid * WIDTH + token // PAGE, mask=valid, other=0)
-        address = ((physical * PAGE + token % PAGE)[:, None] * HK + kvhead) * D + d[None, :]
+        physical = tl.load(TABLE + sid.to(tl.int64) * WIDTH + token // PAGE, mask=valid, other=0)
+        address = ((physical.to(tl.int64) * PAGE + token % PAGE)[:, None] * HK + kvhead) * D + d[None, :]
         keys = tl.load(KC + address, mask=valid[:, None] & (d[None, :] < D), other=0).to(tl.float32)
         scores = tl.sum(keys * q[None, :], axis=1) * (D ** -0.5)
         scores = tl.where(valid, scores, -float("inf"))
@@ -109,8 +109,8 @@ def _attention_kernel(Q, KC, VC, TABLE, LENGTHS, QSID, QPOS, SELECTED, OUT, LSE,
         acc = acc * alpha + tl.sum(weights[:, None] * values, axis=0)
         z = z * alpha + tl.sum(weights, axis=0)
         m = tl.where(has_valid, next_m, m)
-    tl.store(OUT + (query * HQ + head) * D + d, acc / z, mask=d < D)
-    tl.store(LSE + query * HQ + head, m + tl.log(z))
+    tl.store(OUT + (query.to(tl.int64) * HQ + head) * D + d, acc / z, mask=d < D)
+    tl.store(LSE + query.to(tl.int64) * HQ + head, m + tl.log(z))
 
 
 def append_tokens(k, v, kc, vc, table, ids, positions):

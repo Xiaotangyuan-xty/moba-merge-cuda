@@ -36,6 +36,8 @@ cache.reset([0])  # 结束该 batch slot 的请求并回收其物理页。
 
 分页大小和 MoBA 块大小独立，不要求整除。仅完整块的均值参与历史选择，因此同次追加中未来块的均值不会影响更早 query。append 分段方式不会引入运行和式的累积漂移。
 
+页号和长度元数据用 int32，全局存储地址的乘加使用 int64，避免较大 KV 张量的元素偏移先在 int32 中溢出；本批不因此宣称验证了大于 8 GiB 的 cache。
+
 ## 支持边界
 
 - inference-only，不提供新 cache/decode 路径的 backward；requires_grad 输入显式拒绝。原 prefill 的输出/梯度接口保留。
