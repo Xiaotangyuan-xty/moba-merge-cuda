@@ -66,7 +66,7 @@ def test_page_math_for_nondivisible_sizes(p):
 
 
 @pytest.mark.parametrize("kwargs",[
-    {"head_dim":7},{"head_dim":264},{"num_kv_heads":0},{"page_size":0},
+    {"head_dim":0},{"head_dim":264},{"num_kv_heads":0},{"page_size":0},
     {"num_pages":0},{"chunk_size":1025},{"dtype":torch.float32},{"device":"cpu"},
 ])
 def test_cache_invalid_contract_before_gpu_initialization(kwargs):

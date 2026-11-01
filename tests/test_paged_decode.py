@@ -196,3 +196,25 @@ def test_extreme_logits_use_stable_online_softmax():
     cache.append(k,rand((13,1,8),cache.dtype,241),sequence_ids=[0],cu_seqlens=[0,13])
     q=torch.full((1,2,8),1000.0,device="cuda",dtype=cache.dtype);q[:,1]=-1000
     check(cache,cache.attend(q,sequence_ids=[0],mode="dense"),q)
+
+
+@pytest.mark.parametrize("dim",[1,2,3,7,15,31,33,63,65,79,95,127,129,191,255])
+@pytest.mark.parametrize("dtype",[torch.bfloat16,torch.float16])
+def test_decode_unaligned_head_dimensions(dim,dtype):
+    cache=PagedKVCache(2,32,2,dim,page_size=3,chunk_size=6,dtype=dtype)
+    cache.append(rand((35,2,dim),dtype,251),rand((35,2,dim),dtype,252),
+                 sequence_ids=[1,0],cu_seqlens=[0,17,35])
+    q=rand((3,4,dim),dtype,253)
+    for mode in ("dense","moba"):
+        check(cache,cache.attend(q,sequence_ids=[0,1,0],positions=[17,16,0],topk=2,mode=mode),q)
+
+
+def test_maximum_topk_with_nonstandard_heads_and_ragged_queries():
+    cache=PagedKVCache(3,97,3,33,page_size=7,chunk_size=8)
+    cache.append(rand((153,3,33),cache.dtype,261),rand((153,3,33),cache.dtype,262),
+                 sequence_ids=[0,1,2],cu_seqlens=[0,81,88,153])
+    q=rand((4,15,33),cache.dtype,263)
+    result=cache.attend(q,sequence_ids=[2,0,1,2],positions=[64,80,6,23],topk=9)
+    assert result.selected_blocks.shape==(4,15,9)
+    assert (result.selected_blocks[2,:,1:]==-1).all()
+    check(cache,result,q)

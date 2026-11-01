@@ -7,6 +7,7 @@
 
 ```python
 from moba_opt import PagedKVCache, ContiguousKVCache
+import torch
 
 cache = PagedKVCache(batch_size=2, max_seq_len=4096, num_kv_heads=4,
                      head_dim=128, page_size=16, chunk_size=128,
@@ -38,7 +39,7 @@ cache.reset([0])  # 结束该 batch slot 的请求并回收其物理页。
 ## 支持边界
 
 - inference-only，不提供新 cache/decode 路径的 backward；requires_grad 输入显式拒绝。原 prefill 的输出/梯度接口保留。
-- D=8..256、8 的倍数，BF16/FP16，Hq 为 Hkv 的正整数倍。
+- 新 decode 路径 D=1..256 的整数，BF16/FP16，Hq 为 Hkv 的正整数倍。原 FlashAttention prefill 路径仍要求 D=8..256、8 的倍数。
 - 单设备、每个 cache 绑定创建时的 CUDA stream，host 操作加锁；跨 stream 和 CUDA Graph capture 显式拒绝。
 - 非空序列，最大长度与物理页池固定；可通过 reset 复用 batch slot，不提供服务调度器、跨请求共享页/COW、滑动窗口或自动扩容。
 - RoPE、QKV 投影和模型层集成由调用方负责，本阶段不加载模型权重，不声明完整模型质量或服务吞吐。

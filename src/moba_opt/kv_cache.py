@@ -57,8 +57,8 @@ class PagedKVCache:
         page_size = positive_int(page_size, "page_size")
         self.num_kv_heads = positive_int(num_kv_heads, "num_kv_heads")
         self.head_dim = positive_int(head_dim, "head_dim")
-        if self.head_dim > 256 or self.head_dim % 8:
-            raise ValueError("head_dim must be a multiple of 8 in [8,256]")
+        if self.head_dim > 256:
+            raise ValueError("decode head_dim must be in [1,256]")
         self.chunk_size = positive_int(chunk_size, "chunk_size")
         if self.chunk_size > 1024:
             raise ValueError("cache chunk_size must be <=1024")
