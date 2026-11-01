@@ -4,7 +4,9 @@
 
 `opt_gqa_cuda` 支持 MHA/GQA/MQA prefill，Hq 必须为 Hkv 的正整数倍，
 D=8..256 且为 8 的倍数，BF16/FP16。完整契约和测试见 `coverage_20261101.md`。
-decode、KV cache、分页 Attention、CUDA Graph 全图捕获仍未支持；新 GQA 性能尚未取证。
+后续已实现连续/分页 KV cache 与增量 decode，详见 `decode_paged_20261101.md`。
+decode 独立支持 D=1..256 的整数；只做 inference，不支持 cache backward、
+跨 stream、CUDA Graph、共享前缀页/COW、滑动窗口或自动扩容。新 GQA/decode 性能尚未正式取证。
 
 ## 历史 MHA 基线支持范围（方案 2.4，56eedcd）
 

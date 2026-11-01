@@ -1,8 +1,13 @@
 # MoBA 稀疏 Attention GPU 优化（moba-opt）
 
-**当前开发分支：适用面扩展（2026-11-01）**。新增 `opt_gqa_cuda` 原生 GQA/MQA
-prefill 与 head_dim=8..256（8 的倍数）。支持契约、独立 FP64 梯度参考与本批
-测试见 `docs/coverage_20261101.md`。decode/KV cache/分页 Attention 尚未实现。
+**当前功能：prefill 与增量 cached decode**。
+
+- `opt_gqa_cuda`：原生 MHA/GQA/MQA prefill，head_dim=8..256（8 的倍数），支持前向与一阶梯度。
+- `PagedKVCache` / `ContiguousKVCache`：inference-only 增量 K/V、绝对 query 位置、逐 token/多 token decode、重置与页回收；Triton Attention 直接按页表读取物理 K/V，不重建全量连续 cache。
+- decode head_dim=1..256 的整数；BF16/FP16；页大小与 MoBA chunk 无需整除。
+- prefill 阶段说明见 `docs/coverage_20261101.md`；decode API、边界和验收见 `docs/decode_paged_20261101.md`。
+
+下方加速数字属于历史 MHA 基线，不代表新 GQA/decode 的性能；完整模型服务、CUDA Graph 和 cache backward 不在当前声明范围。
 
 ## 历史 MHA 基线结果（56eedcd，不代表本次 GQA 加速）
 

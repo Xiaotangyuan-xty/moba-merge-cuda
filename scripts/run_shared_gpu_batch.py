@@ -64,6 +64,8 @@ def main():
     out.mkdir(parents=True,exist_ok=True)
     state_path=out/"gpu_budget.json"
     state=json.loads(state_path.read_text()) if state_path.exists() else {"used_seconds":0,"runs":[]}
+    if any(r["tag"] == args.tag for r in state["runs"]):
+        raise SystemExit("Run tag already recorded; choose a new tag to preserve evidence")
     remaining=LIMIT_SECONDS-state["used_seconds"]
     if remaining<=0:raise SystemExit("Approved cumulative GPU batch budget exhausted")
     used,pids,before=inspect()
@@ -73,8 +75,10 @@ def main():
     env=os.environ.copy()
     env.update(CUDA_VISIBLE_DEVICES=GPU_UUID,CUDA_DEVICE_ORDER="PCI_BUS_ID",
                OMP_NUM_THREADS="2",MKL_NUM_THREADS="2",OPENBLAS_NUM_THREADS="2",MAX_JOBS="2")
-    log_path=ROOT/"logs"/(args.tag+".log")
-    log_path.parent.mkdir(exist_ok=True)
+    log_path=ROOT/"logs"/BATCH_ID/(args.tag+".log")
+    log_path.parent.mkdir(parents=True,exist_ok=True)
+    if log_path.exists():
+        raise SystemExit("Run log already exists; refusing to overwrite it")
     started=time.monotonic()
     started_utc=datetime.now(timezone.utc).isoformat()
     source_hashes={str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest()
@@ -103,6 +107,7 @@ def main():
                 terminate_owned(proc)
             elapsed=time.monotonic()-started
             run={"tag":args.tag,"command":cmd,"gpu_uuid":GPU_UUID,"wall_seconds":elapsed,
+                 "log_path":str(log_path.relative_to(ROOT)),
                  "started_utc":started_utc,"finished_utc":datetime.now(timezone.utc).isoformat(),
                  "batch_id":BATCH_ID,"limit_seconds":LIMIT_SECONDS,"limit_mib":LIMIT_MIB,
                  "peak_device_mib":peak,"reason":reason,"returncode":None if proc is None else proc.returncode,

@@ -1,6 +1,6 @@
 # 增量 decode、KV cache 与直接分页 Attention
 
-日期：2026-11-01。本阶段代码从 Mac 提交到 GitHub，服务器只同步代码并计算验证。
+开始日期：2026-11-01，验收日期：2026-11-02。本阶段代码从 Mac 提交到 GitHub，服务器只同步代码并计算验证。
 状态：实现与测试用例已建立；最终验收结果在实验完成后填入。
 
 ## 接口与语义
@@ -46,12 +46,15 @@ cache.reset([0])  # 结束该 batch slot 的请求并回收其物理页。
 - GPU metadata 由 CPU 管理并同步，默认输入检查也会同步；不是无 host 开销的实现。
 - mapping/routing tie 跟随 torch.topk 的非稳定行为，不承诺 tie 时与另一布局逐位选择同一块。独立参考与无 tie 的构造用例分别检查 attention 数学和路由规则。
 - 页池/长度/输入验证失败不发布新布局；CUDA 异步执行错误后的缓存需重建，不承诺设备故障下的事务恢复。
+- append 输入不得与该 cache 的物理 K/V storage 别名；需要 clone 后使用。`materialize` 是诊断用独立拷贝，不在 attention 执行路径中。
 
 ## 验证设计
 
 CPU 测试覆盖页分配计划、容量失败无状态变更、陈旧计划、重置和非连续页复用；独立 FP64 参考只读取逻辑 K/V 和 query 位置，不复用页表或在线 softmax。
 
-GPU 测试覆盖连续与分页 cache、逐 token 和多 token append、GQA/MQA、32 个 D×两种 dtype、非整除 page/chunk、页回收、因果和请求隔离、对原 prefill 最后一行对照、8K 上下文、极端 logits、chunk_size 1/1024，以及显式错误边界。代码中包含的测试不是已通过声明，最终结果以保存的日志/XML 为准。
+GPU 测试覆盖连续与分页 cache、逐 token 和多 token append、GQA/MQA、32 个对齐 D 和 15 个非对齐 D×两种 dtype、非整除 page/chunk、页回收、因果和请求隔离、对原 prefill 最后一行对照、8K 上下文、极端 logits、chunk_size 1/1024、max topk=9、不规则头数，以及显式错误边界。代码中包含的测试不是已通过声明，最终结果以保存的日志/XML 为准。
+
+初轮 decode 103 项通过；加入非对齐 D 和 ragged/max-topk 后 134 项通过。旧 prefill 与首轮 cache 的整体验证为 431 通过/2 个双卡项跳过。最终版本还需包含追加 storage 别名保护后的统一回归，以下以最终记录为准。
 
 本批只获准物理 GPU1；预计设备显存上限 8 GiB、GPU 进程累计墙钟上限 20 分钟。每轮检查显存及进程，发现其他任务进入目标卡时只停止本批自身进程组。结果和源码 hash 保存在 `results/decode_paged_20261101/`。
 
