@@ -138,12 +138,18 @@ class PagedKVCache:
     def _gpu(self, data):
         return torch.tensor(data, dtype=torch.int32, device=self.device)
 
+    def _reject_storage_alias(self, *tensors):
+        pools = {self.k_cache.untyped_storage().data_ptr(), self.v_cache.untyped_storage().data_ptr()}
+        if any(t.untyped_storage().data_ptr() in pools for t in tensors):
+            raise ValueError("append inputs must not alias KV cache storage; clone first")
+
     @torch.no_grad()
     def append(self, k, v, *, sequence_ids, cu_seqlens=None):
         with self._lock, torch.cuda.device(self.device):
             self._check_stream()
             self._tensor(k, "k", expected_heads=self.num_kv_heads)
             self._tensor(v, "v", expected_heads=self.num_kv_heads, expected_tokens=k.shape[0])
+            self._reject_storage_alias(k, v)
             ids, counts = self._append_counts(k.shape[0], sequence_ids, cu_seqlens)
             plan = self._layout.plan_append(ids, counts)
             # Allocate metadata before modifying GPU data. Validation/pool failures
@@ -219,6 +225,7 @@ class PagedKVCache:
             self._tensor(k, "k", expected_heads=self.num_kv_heads)
             self._tensor(v, "v", expected_heads=self.num_kv_heads, expected_tokens=k.shape[0])
             self._tensor(q, "q", expected_tokens=k.shape[0])
+            self._reject_storage_alias(q)
             if q.shape[1] % self.num_kv_heads:
                 raise ValueError("Hq must be a multiple of Hkv")
             info = self.append(k, v, sequence_ids=sequence_ids, cu_seqlens=cu_seqlens)

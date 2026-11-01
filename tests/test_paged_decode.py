@@ -218,3 +218,19 @@ def test_maximum_topk_with_nonstandard_heads_and_ragged_queries():
     assert result.selected_blocks.shape==(4,15,9)
     assert (result.selected_blocks[2,:,1:]==-1).all()
     check(cache,result,q)
+
+
+@pytest.mark.parametrize("combined",[False,True])
+def test_append_rejects_aliases_before_mutation(combined):
+    cache=PagedKVCache(1,8,1,8,page_size=3,chunk_size=4)
+    cache.k_cache.zero_();cache.v_cache.zero_()
+    alias=cache.k_cache.reshape(-1,1,8)[:1]
+    external=rand((1,1,8),cache.dtype,271)
+    with pytest.raises(ValueError,match="must not alias"):
+        if combined:
+            cache.append_and_attend(alias,external,external,sequence_ids=[0])
+        else:
+            cache.append(alias,external,sequence_ids=[0])
+    assert cache.lengths==(0,)
+    cache.append(external,external,sequence_ids=[0])
+    assert cache.lengths==(1,)

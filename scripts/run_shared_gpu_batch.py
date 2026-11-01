@@ -14,6 +14,7 @@ import subprocess
 import time
 import hashlib
 import re
+from datetime import datetime, timezone
 
 GPU_UUID=os.environ.get("MOBA_COVERAGE_GPU_UUID")
 ROOT=Path(__file__).resolve().parents[1]
@@ -75,6 +76,7 @@ def main():
     log_path=ROOT/"logs"/(args.tag+".log")
     log_path.parent.mkdir(exist_ok=True)
     started=time.monotonic()
+    started_utc=datetime.now(timezone.utc).isoformat()
     source_hashes={str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest()
                    for folder in ("src","tests","reference","scripts","benchmarks","configs")
                    for p in (ROOT/folder).rglob("*") if p.is_file() and p.suffix in (".py",".cu",".cpp",".sh",".yaml")}
@@ -101,6 +103,8 @@ def main():
                 terminate_owned(proc)
             elapsed=time.monotonic()-started
             run={"tag":args.tag,"command":cmd,"gpu_uuid":GPU_UUID,"wall_seconds":elapsed,
+                 "started_utc":started_utc,"finished_utc":datetime.now(timezone.utc).isoformat(),
+                 "batch_id":BATCH_ID,"limit_seconds":LIMIT_SECONDS,"limit_mib":LIMIT_MIB,
                  "peak_device_mib":peak,"reason":reason,"returncode":None if proc is None else proc.returncode,
                  "before":before,"source_hashes":source_hashes,
                  "git_head":subprocess.check_output(["git","rev-parse","HEAD"],cwd=ROOT,text=True).strip()}
