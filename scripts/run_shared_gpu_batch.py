@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Approved coverage batch only: physical GPU1, <=6 GiB, <=15 min cumulative.
+"""Run an explicitly approved GPU1 batch with private per-batch resource limits.
 
 Monitors via nvidia-smi. If another process appears, terminate only the child
 process group created here. No process discovery/kill outside that group.
@@ -13,11 +13,13 @@ import signal
 import subprocess
 import time
 import hashlib
+import re
 
 GPU_UUID=os.environ.get("MOBA_COVERAGE_GPU_UUID")
 ROOT=Path(__file__).resolve().parents[1]
-LIMIT_SECONDS=900
-LIMIT_MIB=6144
+LIMIT_SECONDS=int(os.environ.get("MOBA_BATCH_LIMIT_SECONDS", "900"))
+LIMIT_MIB=int(os.environ.get("MOBA_BATCH_LIMIT_MIB", "6144"))
+BATCH_ID=os.environ.get("MOBA_BATCH_ID", "coverage_20261101")
 
 
 def inspect():
@@ -51,14 +53,18 @@ def main():
     ap.add_argument("--tag",required=True)
     ap.add_argument("command",nargs=argparse.REMAINDER)
     args=ap.parse_args()
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", BATCH_ID) or not re.fullmatch(r"[A-Za-z0-9_-]+", args.tag):
+        raise SystemExit("Batch ID and tag must contain only letters, digits, _ or -")
+    if LIMIT_SECONDS <= 0 or LIMIT_MIB <= 0:
+        raise SystemExit("Batch resource limits must be positive")
     cmd=args.command[1:] if args.command[:1]==["--"] else args.command
     if not cmd:raise SystemExit("No command")
-    out=ROOT/"results"/"coverage_20261101"
+    out=ROOT/"results"/BATCH_ID
     out.mkdir(parents=True,exist_ok=True)
     state_path=out/"gpu_budget.json"
     state=json.loads(state_path.read_text()) if state_path.exists() else {"used_seconds":0,"runs":[]}
     remaining=LIMIT_SECONDS-state["used_seconds"]
-    if remaining<=0:raise SystemExit("Approved 15-minute GPU batch budget exhausted")
+    if remaining<=0:raise SystemExit("Approved cumulative GPU batch budget exhausted")
     used,pids,before=inspect()
     if pids or used>64:
         (out/(args.tag+"_blocked.json")).write_text(json.dumps(before,indent=2))
@@ -84,9 +90,9 @@ def main():
                 if pids-{proc.pid}:
                     reason="foreign process entered GPU1";break
                 if used>LIMIT_MIB:
-                    reason="6 GiB batch memory ceiling exceeded";break
+                    reason="approved batch memory ceiling exceeded";break
                 if time.monotonic()-started>remaining:
-                    reason="15-minute cumulative batch time exhausted";break
+                    reason="approved cumulative batch time exhausted";break
         except BaseException as exc:
             reason=f"monitor/runner error: {exc}"
             raise
