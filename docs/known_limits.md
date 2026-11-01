@@ -1,6 +1,12 @@
 # 已知限制与适用边界（2026-10-16，外部审查后修订）
 
-## 支持范围（方案 2.4 主线）
+## 当前适用面扩展分支（2026-11-01）
+
+`opt_gqa_cuda` 支持 MHA/GQA/MQA prefill，Hq 必须为 Hkv 的正整数倍，
+D=8..256 且为 8 的倍数，BF16/FP16。完整契约和测试见 `coverage_20261101.md`。
+decode、KV cache、分页 Attention、CUDA Graph 全图捕获仍未支持；新 GQA 性能尚未取证。
+
+## 历史 MHA 基线支持范围（方案 2.4，56eedcd）
 
 - 单张 A40（CC 8.6）；packed varlen `[T,H,D]`；MHA（Q/K/V head 数相同）；causal、dropout=0
 - head_dim 64/128；BF16 与 FP16（FP16 验证于 F03S/F07M/F12L 三代表配置）

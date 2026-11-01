@@ -54,8 +54,11 @@ class OptMixedAttention(torch.autograd.Function):
         moba_q_sh_indices,
         moba_topk,
         merge_backend,
+        remote_max_seqlen=None,
     ):
         ctx.max_seqlen = max_seqlen
+        ctx.remote_max_seqlen = max_seqlen if remote_max_seqlen is None else remote_max_seqlen
+        ctx.has_remote_max = remote_max_seqlen is not None
         ctx.moba_chunk_size = moba_chunk_size
         ctx.softmax_scale = softmax_scale = q.shape[-1] ** (-0.5)
 
@@ -82,7 +85,7 @@ class OptMixedAttention(torch.autograd.Function):
             v=moba_kv[:, 1],
             cu_seqlens_q=moba_cu_seqlen_q,
             cu_seqlens_k=moba_cu_seqlen_kv,
-            max_seqlen_q=max_seqlen,
+            max_seqlen_q=ctx.remote_max_seqlen,
             max_seqlen_k=moba_chunk_size,
             softmax_scale=softmax_scale,
             causal=False,
@@ -204,7 +207,7 @@ class OptMixedAttention(torch.autograd.Function):
             dv=None,
             cu_seqlens_q=moba_cu_seqlen_q,
             cu_seqlens_k=moba_cu_seqlen_kv,
-            max_seqlen_q=max_seqlen,
+            max_seqlen_q=ctx.remote_max_seqlen,
             max_seqlen_k=moba_chunk_size,
             softmax_scale=softmax_scale,
             causal=False,
@@ -216,7 +219,8 @@ class OptMixedAttention(torch.autograd.Function):
         )
 
         dmkv = torch.stack((dmk, dmv), dim=1)
-        return dq, dk, dv, None, dmq, dmkv, None, None, None, None, None, None, None
+        grads = (dq, dk, dv, None, dmq, dmkv, None, None, None, None, None, None, None)
+        return grads + (None,) if ctx.has_remote_max else grads
 
 
 def moba_attn_varlen_opt(
@@ -389,7 +393,7 @@ def moba_attn_varlen_opt(
 
 
 def _opt_adapter(q, k, v, cu_seqlens, max_seqlen, config, merge_backend):
-    _validate(q, k, v, cu_seqlens)
+    _validate(q, k, v, cu_seqlens, max_seqlen=max_seqlen, config=config)
     return moba_attn_varlen_opt(
         q,
         k,

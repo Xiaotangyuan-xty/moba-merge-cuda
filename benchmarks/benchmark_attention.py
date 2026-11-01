@@ -27,6 +27,7 @@ import itertools
 import json
 import sys
 import time
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -55,10 +56,12 @@ def build_inputs(cfg, device, seed):
     dtype = DTYPES[cfg["dtype"]]
     gen = torch.Generator().manual_seed(seed)
 
-    def mk():
-        return torch.randn((total, heads, dim), generator=gen, dtype=torch.float32).to(device=device, dtype=dtype)
+    kv_heads = cfg.get("kv_heads", heads)
 
-    q, k, v = mk(), mk(), mk()
+    def mk(n_heads):
+        return torch.randn((total, n_heads, dim), generator=gen, dtype=torch.float32).to(device=device, dtype=dtype)
+
+    q, k, v = mk(heads), mk(kv_heads), mk(kv_heads)
     lens = cfg.get("seq_lens") or [total]
     assert all(x > 0 for x in lens) and sum(lens) == total, f"bad seq_lens {lens} vs T={total}"
     cu = torch.tensor([0] + list(itertools.accumulate(lens)), device=device, dtype=torch.int32)
@@ -201,12 +204,14 @@ def main():
             "status": "ok",
             "config_id": cid,
             "upstream_commit": upstream,
-            "candidate_commit": None,
+            "candidate_commit": subprocess.check_output(["git","rev-parse","HEAD"],cwd=ROOT,text=True).strip(),
+            "working_tree_dirty": bool(subprocess.check_output(["git","status","--porcelain"],cwd=ROOT,text=True).strip()),
             "gpu": torch.cuda.get_device_name(device),
             "device_index": device.index if device.index is not None else torch.cuda.current_device(),
-            "config": {k: cfg[k] for k in ("total_tokens", "heads", "head_dim", "chunk_size", "topk", "dtype")},
+            "config": {**{k: cfg[k] for k in ("total_tokens", "heads", "head_dim", "chunk_size", "topk", "dtype")},
+                       "kv_heads": cfg.get("kv_heads",cfg["heads"])},
             "seq_lens": cfg.get("seq_lens"),
-            "batch": cfg.get("batch", 1),
+            "batch": len(cfg.get("seq_lens") or [cfg["total_tokens"]]),
             "metadata_mode": "cold_fresh_object_per_call" if args.metadata == "cold" else cfg["metadata_mode"],
             "seed": args.seed,
             "rounds": args.rounds,

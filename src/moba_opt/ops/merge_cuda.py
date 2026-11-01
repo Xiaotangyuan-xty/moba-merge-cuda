@@ -37,6 +37,8 @@ def merge_forward_cuda(self_out, self_lse, remote_out, remote_lse, mapping, kmax
     check_capacity=True makes the slot build raise on capacity overflow
     (one small device->host sync per call). Returns (O, LSE fp32).
     """
+    if mapping.dim() != 1 or mapping.dtype not in (torch.int32, torch.int64):
+        raise ValueError("mapping must be a 1D int32/int64 tensor")
     if kmax is None:
         P = self_out.shape[0] * self_out.shape[1]
         mapping_n = mapping.reshape(-1)

@@ -1,5 +1,11 @@
 # MoBA 稀疏 Attention GPU 优化（moba-opt）
 
+**当前开发分支：适用面扩展（2026-11-01）**。新增 `opt_gqa_cuda` 原生 GQA/MQA
+prefill 与 head_dim=8..256（8 的倍数）。支持契约、独立 FP64 梯度参考与本批
+测试见 `docs/coverage_20261101.md`。decode/KV cache/分页 Attention 尚未实现。
+
+## 历史 MHA 基线结果（56eedcd，不代表本次 GQA 加速）
+
 状态：完成（经一轮外部审查修订）。**主结果**：CUDA 全局 softmax 合并替换官方 PyTorch 合并路径，单 A40 上完整 Attention 前向提速 1.123–1.455×、前反向合计 1.062–1.129×（24 组配对几何平均 1.088×；统计口径：轮中位数的跨轮中位数），反向不变，峰值显存持平（独立进程复测），129 项测试全过，选块与官方逐位一致。技术报告：`docs/report.md`。
 
 - 上游固定版本：MoonshotAI/MoBA @ `b5d58363311d3ca946f1ec444182727c15e338b5`（`third_party/UPSTREAM_SHA.txt`，third_party 不入库、零改动）

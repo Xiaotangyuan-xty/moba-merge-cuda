@@ -1,0 +1,17 @@
+defaults:
+  dtype: bfloat16
+  batch: 1
+  chunk_size: 128
+  topk: 4
+  head_dim: 128
+  causal: true
+  dropout: 0.0
+  metadata_mode: warm_immutable_tensor
+
+# Shapes only; no complete-model integration or quality claims.
+configs:
+  CLI_SMOKE: {total_tokens: 512, heads: 8, kv_heads: 2, head_dim: 80}
+  G28_4: {total_tokens: 2048, heads: 28, kv_heads: 4}
+  G16_2: {total_tokens: 2048, heads: 16, kv_heads: 2}
+  G32_8: {total_tokens: 8192, heads: 32, kv_heads: 8, chunk_size: 512}
+  M16_1: {total_tokens: 4096, heads: 16, kv_heads: 1, head_dim: 80, dtype: float16}

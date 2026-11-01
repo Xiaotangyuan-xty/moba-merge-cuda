@@ -16,6 +16,7 @@
 #include <cuda_bf16.h>
 #include <cuda_fp16.h>
 #include <cstdint>
+#include <limits>
 
 namespace moba_opt {
 
@@ -60,7 +61,7 @@ __device__ __forceinline__ __nv_bfloat16 from_f32<__nv_bfloat16>(float v) { retu
 template <>
 __device__ __forceinline__ __half from_f32<__half>(float v) { return __float2half(v); }
 
-template <typename scalar_t, int D>
+template <typename scalar_t, int DPAD>
 __global__ void merge_kernel(
     const scalar_t* __restrict__ self_out,
     const float* __restrict__ self_lse,
@@ -71,8 +72,9 @@ __global__ void merge_kernel(
     scalar_t* __restrict__ out,
     float* __restrict__ lse,
     const int64_t P,
+    const int D,
     const int kpad) {
-  constexpr int LPT = D / 32;  // elements per lane
+  constexpr int LPT = DPAD / 32;
   const int lane = threadIdx.x & 31;
   const int64_t gwarp = ((int64_t)blockIdx.x * blockDim.x + threadIdx.x) >> 5;
   const int64_t stride = (int64_t)gridDim.x * (blockDim.x >> 5);
@@ -107,20 +109,29 @@ __global__ void merge_kernel(
     float acc[LPT];
     const scalar_t* srow = self_out + row * D;
 #pragma unroll
-    for (int i = 0; i < LPT; ++i) acc[i] = to_f32(srow[lane * LPT + i]) * w_self;
+    for (int i = 0; i < LPT; ++i) {
+      const int d = lane + i * 32;
+      acc[i] = d < D ? to_f32(srow[d]) * w_self : 0.0f;
+    }
 
     for (int j = 0; j < cnt; ++j) {
       const float w_b = __shfl_sync(0xffffffffu, w_j, j);
       const int s_b = __shfl_sync(0xffffffffu, slot_j, j);
       const scalar_t* rrow = remote_out + (int64_t)s_b * D;
 #pragma unroll
-      for (int i = 0; i < LPT; ++i) acc[i] += w_b * to_f32(rrow[lane * LPT + i]);
+      for (int i = 0; i < LPT; ++i) {
+        const int d = lane + i * 32;
+        if (d < D) acc[i] += w_b * to_f32(rrow[d]);
+      }
     }
 
     const float inv_z = 1.0f / z;
     scalar_t* orow = out + row * D;
 #pragma unroll
-    for (int i = 0; i < LPT; ++i) orow[lane * LPT + i] = from_f32<scalar_t>(acc[i] * inv_z);
+    for (int i = 0; i < LPT; ++i) {
+      const int d = lane + i * 32;
+      if (d < D) orow[d] = from_f32<scalar_t>(acc[i] * inv_z);
+    }
     if (lane == 0) lse[row] = m + logf(z);
   }
 }
@@ -140,14 +151,20 @@ void launch_merge(
     int64_t P, int64_t D, int kpad, cudaStream_t stream) {
   const int threads = kWarpsPerBlock * 32;
   const int64_t blocks = (P + kWarpsPerBlock - 1) / kWarpsPerBlock;
-  if (D == 64) {
+  if (D <= 32) {
+    merge_kernel<scalar_t, 32><<<blocks, threads, 0, stream>>>(
+        self_out, self_lse, remote_out, remote_lse, slots, counts, out, lse, P, D, kpad);
+  } else if (D <= 64) {
     merge_kernel<scalar_t, 64><<<blocks, threads, 0, stream>>>(
-        self_out, self_lse, remote_out, remote_lse, slots, counts, out, lse, P, kpad);
-  } else if (D == 128) {
+        self_out, self_lse, remote_out, remote_lse, slots, counts, out, lse, P, D, kpad);
+  } else if (D <= 128) {
     merge_kernel<scalar_t, 128><<<blocks, threads, 0, stream>>>(
-        self_out, self_lse, remote_out, remote_lse, slots, counts, out, lse, P, kpad);
+        self_out, self_lse, remote_out, remote_lse, slots, counts, out, lse, P, D, kpad);
+  } else if (D <= 256) {
+    merge_kernel<scalar_t, 256><<<blocks, threads, 0, stream>>>(
+        self_out, self_lse, remote_out, remote_lse, slots, counts, out, lse, P, D, kpad);
   } else {
-    TORCH_CHECK(false, "head_dim must be 64 or 128, got ", D);
+    TORCH_CHECK(false, "head_dim exceeds 256");
   }
 }
 
@@ -162,6 +179,15 @@ std::vector<torch::Tensor> merge_forward_cuda(
   TORCH_CHECK(self_out.is_cuda() && self_out.dim() == 3, "self_out must be CUDA [T,H,D]");
   const at::cuda::CUDAGuard device_guard(self_out.device());
   const auto st = self_out.scalar_type();
+  for (const auto& t : {self_lse, remote_out, remote_lse, mapping}) {
+    TORCH_CHECK(t.is_cuda() && t.device() == self_out.device(),
+                "all merge inputs must be CUDA tensors on self_out.device");
+  }
+  TORCH_CHECK(remote_out.scalar_type() == st, "remote_out dtype must match self_out");
+  TORCH_CHECK(mapping.dim() == 1 && remote_lse.dim() == 1,
+              "mapping and remote_lse must be 1D");
+  TORCH_CHECK(remote_out.dim() == 2 || (remote_out.dim() == 3 && remote_out.size(1) == 1),
+              "remote_out must be [M,D] or [M,1,D]");
   TORCH_CHECK(st == at::kFloat || st == at::kBFloat16 || st == at::kHalf,
               "self_out dtype must be fp32/bf16/fp16");
   TORCH_CHECK(self_lse.scalar_type() == at::kFloat && remote_lse.scalar_type() == at::kFloat,
@@ -174,6 +200,12 @@ std::vector<torch::Tensor> merge_forward_cuda(
   const int64_t D = self_out.size(2);
   const int64_t P = T * H;
   const int64_t M = mapping.size(0);
+  TORCH_CHECK(T > 0 && H > 0 && D >= 8 && D <= 256 && D % 8 == 0,
+              "nonempty T,H required; head_dim must be a multiple of 8 in [8,256]");
+  TORCH_CHECK(self_lse.dim() == 2 && self_lse.size(0) == T && self_lse.size(1) == H,
+              "self_lse must be [T,H]");
+  TORCH_CHECK(M < std::numeric_limits<int>::max() && P < std::numeric_limits<int>::max(),
+              "mapping exceeds int32 indexing capacity");
   TORCH_CHECK(remote_out.numel() == M * D, "remote_out shape mismatch");
   TORCH_CHECK(remote_lse.numel() == M, "remote_lse shape mismatch");
   TORCH_CHECK(self_lse.numel() == P, "self_lse shape mismatch");
@@ -184,6 +216,10 @@ std::vector<torch::Tensor> merge_forward_cuda(
   auto remote_out_c = remote_out.reshape({M, D}).contiguous();
   auto remote_lse_c = remote_lse.contiguous();
   auto mapping_c = mapping.contiguous();
+  if (check_capacity && M > 0) {
+    TORCH_CHECK(mapping_c.min().item<int64_t>() >= 0 && mapping_c.max().item<int64_t>() < P,
+                "mapping entries must be in [0,T*H)");
+  }
 
   auto iopts = torch::TensorOptions().dtype(torch::kInt32).device(self_out.device());
   auto slots = torch::empty({P, kpad}, iopts);

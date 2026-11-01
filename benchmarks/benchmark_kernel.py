@@ -191,18 +191,18 @@ def main():
             )
 
         def run_kernel():
-            _merge_kernel[(P,)](so, sl, ro, rl, slots_t, counts_t, out_buf, lse_buf, D=D, KPAD=kpad, num_warps=4)
+            _merge_kernel[(P,)](so, sl, ro, rl, slots_t, counts_t, out_buf, lse_buf, D=D, DPAD=triton.next_power_of_2(D), KPAD=kpad, num_warps=4)
 
         def run_stage_torch():
             s, c = build_slots_torch(inp["mapping"], P, kmax, kpad=kpad)
-            _merge_kernel[(P,)](so, sl, ro, rl, s, c, out_buf, lse_buf, D=D, KPAD=kpad, num_warps=4)
+            _merge_kernel[(P,)](so, sl, ro, rl, s, c, out_buf, lse_buf, D=D, DPAD=triton.next_power_of_2(D), KPAD=kpad, num_warps=4)
 
         def run_stage_atomic():
             counts_a.zero_()
             _build_slots_atomic_kernel[(triton.cdiv(M, 256),)](
                 inp["mapping"], slots_a, counts_a, M, KPAD=kpad, BLOCK=256
             )
-            _merge_kernel[(P,)](so, sl, ro, rl, slots_a, counts_a, out_buf, lse_buf, D=D, KPAD=kpad, num_warps=4)
+            _merge_kernel[(P,)](so, sl, ro, rl, slots_a, counts_a, out_buf, lse_buf, D=D, DPAD=triton.next_power_of_2(D), KPAD=kpad, num_warps=4)
 
         sl_3d = inp["self_lse_hs"].t().contiguous()
 

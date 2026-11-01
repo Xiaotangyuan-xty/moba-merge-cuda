@@ -1,4 +1,5 @@
 third_party/
+/third_party
 results/
 logs/
 __pycache__/

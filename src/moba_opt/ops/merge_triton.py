@@ -93,10 +93,11 @@ def _merge_kernel(
     out_ptr,
     lse_ptr,
     D: tl.constexpr,
+    DPAD: tl.constexpr,
     KPAD: tl.constexpr,
 ):
     pid = tl.program_id(0)
-    offs_d = tl.arange(0, D)
+    offs_d = tl.arange(0, DPAD)
     offs_k = tl.arange(0, KPAD)
 
     # defensive cap: with the capacity check (or the structural bound of the
@@ -113,15 +114,15 @@ def _merge_kernel(
     w_rem = tl.where(valid, tl.exp(l_rem - m), 0.0)
     z = w_self + tl.sum(w_rem, axis=0)
 
-    o_self = tl.load(self_out_ptr + pid * D + offs_d).to(tl.float32)
+    o_self = tl.load(self_out_ptr + pid * D + offs_d, mask=offs_d < D, other=0.0).to(tl.float32)
     r = tl.load(
         remote_out_ptr + slot[:, None] * D + offs_d[None, :],
-        mask=valid[:, None],
+        mask=valid[:, None] & (offs_d[None, :] < D),
         other=0.0,
     ).to(tl.float32)
     o = (w_self * o_self + tl.sum(w_rem[:, None] * r, axis=0)) / z
 
-    tl.store(out_ptr + pid * D + offs_d, o.to(out_ptr.dtype.element_ty))
+    tl.store(out_ptr + pid * D + offs_d, o.to(out_ptr.dtype.element_ty), mask=offs_d < D)
     tl.store(lse_ptr + pid, m + tl.log(z))
 
 
@@ -136,15 +137,24 @@ def merge_forward(self_out, self_lse, remote_out, remote_lse, mapping, kmax=None
     """
     if self_out.dim() != 3 or not self_out.is_cuda:
         raise ValueError("self_out must be CUDA [T,H,D]")
+    if mapping.dim() != 1 or mapping.dtype not in (torch.int32, torch.int64):
+        raise ValueError("mapping must be a 1D int32/int64 tensor")
     T, H, D = self_out.shape
-    if D & (D - 1):
-        raise ValueError(f"head_dim {D} must be a power of 2 for the prototype kernel")
+    if T < 1 or H < 1 or D < 8 or D > 256 or D % 8:
+        raise ValueError("nonempty T,H required; head_dim must be a multiple of 8 in [8,256]")
     P = T * H
     dev = self_out.device
+    for t in (self_lse, remote_out, remote_lse, mapping):
+        if not t.is_cuda or t.device != dev:
+            raise ValueError("all merge inputs must be CUDA tensors on self_out.device")
+    if remote_out.dtype != self_out.dtype:
+        raise ValueError("remote_out dtype must match self_out")
     ro = remote_out.detach().reshape(-1, D).contiguous()
     rl = remote_lse.detach().reshape(-1).to(torch.float32).contiguous()
     mapping = mapping.to(device=dev, dtype=torch.int64).reshape(-1).contiguous()
     M = mapping.numel()
+    if check_capacity and M and (int(mapping.min().item()) < 0 or int(mapping.max().item()) >= P):
+        raise ValueError("mapping entries must be in [0,T*H)")
     if kmax is None:
         kmax = 1
         if M:
@@ -173,6 +183,6 @@ def merge_forward(self_out, self_lse, remote_out, remote_lse, mapping, kmax=None
         lse = torch.empty((P,), device=dev, dtype=torch.float32)
         _merge_kernel[(P,)](
             so, sl, ro, rl, slots, counts, out, lse,
-            D=D, KPAD=kpad, num_warps=4,
+            D=D, DPAD=triton.next_power_of_2(D), KPAD=kpad, num_warps=4,
         )
     return out.view(T, H, D), lse.view(T, H)
