@@ -87,7 +87,7 @@ def validate(model,tokens):
     print(json.dumps({'native_sdpa_vs_fa2':envelope}),flush=True)
     ref=references['flash_attention_2']
     rows=[]
-    for name in ('hf_fa2','dense_eager','dense_attngraph','dense_modelgraph','dense_modelgraph_packed','moba_k8_modelgraph'):
+    for name in ('hf_fa2','dense_eager','dense_modelgraph','dense_modelgraph_packed','moba_k8_modelgraph'):
         s=make_session(model,name,160)
         try:
             first=prefill(s,ids);initial=dense_metrics(ref[0],first)
@@ -185,6 +185,8 @@ def paired_latency(model,tokens,args):
                 cand_m=[statistics.median(x['wall_ms'] for x in samples if x['impl']==method and x['round']==r) for r in range(args.rounds)]
                 rows.append(dict(method=method,prefix=length,samples=samples,hf_prefill_ms=base_prefill,
                     candidate_prefill_ms=candidate_prefill,prepare_capture_ms=setup,
+                    semantic_dense_fastpath=getattr(candidate,'all_selected',False),
+                    attention_backend='fa2' if getattr(candidate,'effective_dense',True) else 'moba_triton',
                     hf_step_ms=statistics.median(base_m),candidate_step_ms=statistics.median(cand_m),
                     paired_speedup=statistics.median(a/b for a,b in zip(base_m,cand_m))))
                 print(json.dumps({k:v for k,v in rows[-1].items() if k!='samples'}),flush=True)

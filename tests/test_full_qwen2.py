@@ -21,7 +21,8 @@ def test_full_dense_logits_and_cache_progress_match_hf(backend,packed):
     m=model();ids=torch.arange(1,13,device='cuda')[None]
     with torch.inference_mode():
         ref=m(ids,use_cache=True)
-        with FullQwen2Session(m,24,backend=backend,fused_qkv=packed,chunk=4) as s:
+        with FullQwen2Session(m,24,backend=backend,fused_qkv=packed,chunk=4,
+                             dense_backend='triton' if backend=='attention_graph' else 'fa2') as s:
             h=s.prefill_hidden(ids)
             torch.testing.assert_close(m.lm_head(h),ref.logits,atol=0.003,rtol=0.03)
             before=[c.materialize(0) for c in s.caches]

@@ -29,6 +29,8 @@ class FullQwen2Session:
         self.dense_backend=dense_backend
         self.all_selected=mode=='moba' and (self.capacity+chunk-1)//chunk<=topk
         self.effective_dense=mode=='dense' or self.all_selected
+        if backend=='attention_graph' and self.effective_dense and dense_backend=='fa2':
+            raise ValueError('FA2 dense uses eager or model_graph; attention_graph is for the Triton core')
         self.fused_qkv=fused_qkv
         self.profile=False
         self.device=next(model.parameters()).device
