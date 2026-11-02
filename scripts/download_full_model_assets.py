@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 import subprocess
 
+REVISION='060db6499f32faf8b98477b0a26969ef7d8b9987'
+
 
 def fetch(url,path,rate):
     tmp=path.with_suffix(path.suffix+'.part')
@@ -21,8 +23,9 @@ def main():
     args=p.parse_args()
     out=Path(args.out);out.mkdir(parents=True,exist_ok=True)
     manifest=Path(args.manifest) if args.manifest else out/'model_manifest.json'
-    if not args.manifest:fetch('https://huggingface.co/api/models/Qwen/Qwen2.5-0.5B?blobs=true',manifest,args.rate)
+    if not args.manifest:fetch(f'https://huggingface.co/api/models/Qwen/Qwen2.5-0.5B/revision/{REVISION}?blobs=true',manifest,args.rate)
     meta=json.loads(manifest.read_text());revision=meta['sha']
+    if revision!=REVISION:raise ValueError('unexpected model revision')
     allow=['config.json','generation_config.json','tokenizer.json','tokenizer_config.json','merges.txt','vocab.json','model.safetensors']
     files={x['rfilename']:x for x in meta['siblings']}
     model=out/'qwen2.5-0.5b';model.mkdir(exist_ok=True)
