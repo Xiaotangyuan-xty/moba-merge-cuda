@@ -55,6 +55,10 @@ def latency_summary(data,methods,lengths):
         clean['paired_speedup']=statistics.median(x/y for x,y in zip(a,b))
         saving=clean['hf_step_ms']-clean['candidate_step_ms']
         clean['capture_break_even_tokens']=math.ceil(clean['prepare_capture_ms']/saving) if saving>0 else None
+        extra=(clean['candidate_init_ms']+clean['candidate_prefill_ms']+clean['prepare_capture_ms']
+               -clean['hf_init_ms']-clean['hf_prefill_ms'])
+        clean['extra_request_setup_ms']=extra
+        clean['request_break_even_decode_steps']=math.ceil(max(0,extra)/saving) if saving>0 else None
         out.append(clean)
     return out
 

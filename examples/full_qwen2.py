@@ -10,6 +10,7 @@ from flash_attn import flash_attn_func,flash_attn_with_kvcache
 from transformers.models.qwen2.modeling_qwen2 import apply_rotary_pos_emb
 from moba_opt import PagedKVCache
 from moba_opt.grouped_attention import opt_gqa_cuda
+from moba_opt.cache_layout import positive_int
 from moba_opt.ops import prepared_decode as step_ops
 from moba_opt.ops import paged_decode as page_ops
 
@@ -23,12 +24,14 @@ class FullQwen2Session:
         if getattr(model.config,'use_sliding_window',False):raise ValueError('sliding window unsupported')
         if model.training or any(p.requires_grad for p in model.parameters()):
             raise ValueError('eval model with gradients disabled required')
-        self.model,self.capacity=model,int(capacity)
+        capacity=positive_int(capacity,'capacity');chunk=positive_int(chunk,'chunk');topk=positive_int(topk,'topk')
+        if topk>9:raise ValueError('topk must be <=9')
+        self.model,self.capacity=model,capacity
         self.mode,self.chunk,self.topk,self.backend=mode,chunk,topk,backend
         if dense_backend not in ('fa2','triton'):raise ValueError('dense backend')
         self.dense_backend=dense_backend
         self.all_selected=mode=='moba' and (self.capacity+chunk-1)//chunk<=topk
-        self.effective_dense=mode=='dense' or self.all_selected
+        self.effective_dense=mode=='dense' or topk==1 or self.all_selected
         if backend=='attention_graph' and self.effective_dense and dense_backend=='fa2':
             raise ValueError('FA2 dense uses eager or model_graph; attention_graph is for the Triton core')
         self.fused_qkv=fused_qkv
@@ -99,6 +102,11 @@ class FullQwen2Session:
         self.check()
         if self.plans:raise ValueError('already prepared')
         if not self.caches[0].lengths[0]:raise ValueError('prefill first')
+        if self.effective_dense and self.dense_backend=='fa2':
+            for c in self.caches:
+                allocated=sum(x>=0 for x in c.page_table[0])
+                if c.page_table[0][:allocated]!=tuple(range(allocated)) or c._layout.free_pages!=tuple(range(c._layout.num_pages-1,allocated-1,-1)):
+                    raise ValueError('dense FA2 control requires monotonic single-request physical pages')
         self.plans=[c.prepare_decode([0],self.hq,mode='dense' if self.effective_dense else self.mode,topk=self.topk,check_finite=False)
                     for c in self.caches]
         if self.backend=='attention_graph' and not (self.effective_dense and self.dense_backend=='fa2'):
@@ -163,6 +171,9 @@ class FullQwen2Session:
             raise ValueError('one valid CPU token ID required')
         if not self.plans:raise ValueError('prepare first')
         plans=[p._state.plan() for p in self.plans]
+        if self.effective_dense and self.dense_backend=='fa2' and any(
+            logical!=physical for plan in plans for _,logical,physical in plan.updates):
+            raise ValueError('dense FA2 page layout changed')
         self.input.fill_(token)
         for p,plan in zip(self.plans,plans):p._upload(plan)
         try:
