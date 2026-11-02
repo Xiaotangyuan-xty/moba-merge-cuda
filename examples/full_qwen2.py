@@ -1,0 +1,162 @@
+"""Experimental batch-1 full Qwen2 inference with the repository's KV cache.
+
+Weights stay in the unchanged HF model. No sampling policy, scheduler, padding,
+training, sliding window or dynamic active set. Graphs have fixed capacity.
+"""
+from contextlib import nullcontext
+import torch
+import torch.nn.functional as F
+from flash_attn import flash_attn_func
+from transformers.models.qwen2.modeling_qwen2 import apply_rotary_pos_emb
+from moba_opt import PagedKVCache
+from moba_opt.grouped_attention import opt_gqa_cuda
+
+
+class FullQwen2Session:
+    def __init__(self,model,capacity,*,mode='dense',chunk=128,topk=4,
+                 backend='eager',fused_qkv=False,page=16):
+        if mode not in ('dense','moba'):raise ValueError('mode')
+        if backend not in ('eager','attention_graph','model_graph'):raise ValueError('backend')
+        if model.config.model_type!='qwen2':raise ValueError('Qwen2 architecture required')
+        if model.training or any(p.requires_grad for p in model.parameters()):
+            raise ValueError('eval model with gradients disabled required')
+        self.model,self.capacity=model,int(capacity)
+        self.mode,self.chunk,self.topk,self.backend=mode,chunk,topk,backend
+        self.fused_qkv=fused_qkv
+        self.profile=False
+        self.device=next(model.parameters()).device
+        self.stream=torch.cuda.current_stream(self.device).cuda_stream
+        self.hq=model.config.num_attention_heads
+        self.hk=model.config.num_key_value_heads
+        self.dim=model.config.hidden_size//self.hq
+        self.caches=[PagedKVCache(1,capacity,self.hk,self.dim,page_size=page,chunk_size=chunk,
+                        dtype=next(model.parameters()).dtype,device=self.device) for _ in model.model.layers]
+        self.plans=[];self.graph=None;self.closed=False;self.failed=False
+        self.input=torch.zeros((1,1),device=self.device,dtype=torch.long)
+        self.packed=[]
+        if fused_qkv:
+            for layer in model.model.layers:
+                a=layer.self_attn
+                self.packed.append((torch.cat([a.q_proj.weight,a.k_proj.weight,a.v_proj.weight],0),
+                                    torch.cat([a.q_proj.bias,a.k_proj.bias,a.v_proj.bias],0)))
+
+    def scope(self,name):
+        return torch.profiler.record_function(name) if self.profile else nullcontext()
+
+    def check(self):
+        if self.closed or self.failed:raise ValueError('closed/failed session')
+        if torch.cuda.current_stream(self.device).cuda_stream!=self.stream:raise ValueError('cross-stream session')
+
+    def project(self,index,hidden,cos,sin):
+        a=self.model.model.layers[index].self_attn
+        b,t,_=hidden.shape
+        if self.fused_qkv:
+            qkv=F.linear(hidden,*self.packed[index])
+            q,k,v=qkv.split((self.hq*self.dim,self.hk*self.dim,self.hk*self.dim),dim=-1)
+        else:q,k,v=a.q_proj(hidden),a.k_proj(hidden),a.v_proj(hidden)
+        q=q.view(b,t,self.hq,self.dim).transpose(1,2)
+        k=k.view(b,t,self.hk,self.dim).transpose(1,2)
+        v=v.view(b,t,self.hk,self.dim).transpose(1,2)
+        q,k=apply_rotary_pos_emb(q,k,cos,sin)
+        return tuple(x.transpose(1,2).reshape(b*t,-1,self.dim).contiguous() for x in (q,k,v))
+
+    @torch.no_grad()
+    def prefill_hidden(self,ids):
+        self.check()
+        if self.plans or any(c.lengths[0] for c in self.caches):raise ValueError('fresh session required')
+        if ids.shape[0]!=1 or ids.dim()!=2 or not 0<ids.shape[1]<self.capacity:
+            raise ValueError('batch=1, nonempty prefix below capacity required')
+        t=ids.shape[1]
+        h=self.model.model.embed_tokens(ids)
+        cos,sin=self.model.model.rotary_emb(h,torch.arange(t,device=self.device)[None])
+        cu=torch.tensor([0,t],device=self.device,dtype=torch.int32)
+        for i,layer in enumerate(self.model.model.layers):
+            residual=h
+            q,k,v=self.project(i,layer.input_layernorm(h),cos,sin)
+            self.caches[i].append(k,v,sequence_ids=[0],cu_seqlens=[0,t])
+            if self.mode=='dense':out=flash_attn_func(q[None],k[None],v[None],causal=True)[0]
+            else:out=opt_gqa_cuda(q,k,v,cu,t,dict(chunk_size=self.chunk,topk=self.topk))
+            h=residual+layer.self_attn.o_proj(out.reshape(1,t,-1))
+            h=h+layer.mlp(layer.post_attention_layernorm(h))
+        return self.model.model.norm(h)
+
+    @torch.no_grad()
+    def prepare(self):
+        self.check()
+        if self.plans:raise ValueError('already prepared')
+        if not self.caches[0].lengths[0]:raise ValueError('prefill first')
+        self.plans=[c.prepare_decode([0],self.hq,mode=self.mode,topk=self.topk,check_finite=False)
+                    for c in self.caches]
+        if self.backend=='attention_graph':
+            for p in self.plans:p.capture('step')
+        elif self.backend=='model_graph':self.capture_model()
+
+    def compute_step(self):
+        with self.scope('model/embedding_rope'):
+            h=self.model.model.embed_tokens(self.input)
+            position=self.caches[0]._lengths[:1].to(torch.long).view(1,1)
+            cos,sin=self.model.model.rotary_emb(h,position)
+        for i,(layer,p) in enumerate(zip(self.model.model.layers,self.plans)):
+            residual=h
+            with self.scope('model/norm_qkv_rope'):
+                q,k,v=self.project(i,layer.input_layernorm(h),cos,sin)
+                p.q.copy_(q);p.k.copy_(k);p.v.copy_(v)
+            with self.scope('model/cache_attention'):
+                if self.backend=='attention_graph':p._run('step',True)
+                else:p._compute(True)
+            with self.scope('model/output_projection'):
+                h=residual+layer.self_attn.o_proj(p.output.reshape(1,1,-1))
+            with self.scope('model/mlp'):
+                h=h+layer.mlp(layer.post_attention_layernorm(h))
+        with self.scope('model/norm_lm_head'):
+            self.logits=self.model.lm_head(self.model.model.norm(h))
+        return self.logits
+
+    @torch.no_grad()
+    def capture_model(self):
+        snapshots=[[t.clone() for t in (c._table,c._lengths,c._means,p.delta)] for c,p in zip(self.caches,self.plans)]
+        counters=[p.delta_uploads for p in self.plans]
+        stream=torch.cuda.Stream(device=self.device)
+        try:
+            for p in self.plans:p._upload(p._state.plan())
+            stream.wait_stream(torch.cuda.current_stream(self.device))
+            with torch.cuda.stream(stream):
+                for _ in range(2):
+                    self.compute_step()
+                    for c,snap in zip(self.caches,snapshots):c._lengths.copy_(snap[1])
+            torch.cuda.current_stream(self.device).wait_stream(stream)
+            graph=torch.cuda.CUDAGraph()
+            with torch.cuda.graph(graph,stream=stream):self.compute_step()
+            self.graph=graph
+        finally:
+            torch.cuda.current_stream(self.device).wait_stream(stream)
+            for c,p,snap,n in zip(self.caches,self.plans,snapshots,counters):
+                for target,source in zip((c._table,c._lengths,c._means,p.delta),snap):target.copy_(source)
+                p.delta_uploads=n
+
+    @torch.no_grad()
+    def step(self,token):
+        self.check()
+        if isinstance(token,bool) or not isinstance(token,int) or not 0<=token<self.model.config.vocab_size:
+            raise ValueError('one valid CPU token ID required')
+        if not self.plans:raise ValueError('prepare first')
+        plans=[p._state.plan() for p in self.plans]
+        self.input.fill_(token)
+        for p,plan in zip(self.plans,plans):p._upload(plan)
+        try:
+            if self.graph is not None:self.graph.replay()
+            else:self.compute_step()
+        except Exception:
+            self.failed=True
+            for p in self.plans:p.failed=True
+            raise
+        for p,plan in zip(self.plans,plans):p._state.commit(plan)
+        return self.logits
+
+    def close(self):
+        if self.closed:return
+        for p in self.plans:p.close()
+        self.graph=None;self.closed=True
+
+    def __enter__(self):return self
+    def __exit__(self,*exc):self.close()
