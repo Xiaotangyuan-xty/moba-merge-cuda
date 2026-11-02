@@ -92,3 +92,18 @@ def test_input_workspace_alias_and_output_reuse_contract():
         with pytest.raises(ValueError,match="aliases"):p.step(p.v,p.k,p.q)
         a=p.step(q,q,q);b=p.step(q,q,q)
         assert a.output.data_ptr()==b.output.data_ptr()
+
+
+def test_capture_after_live_steps_and_graph_capacity_boundary():
+    c=PagedKVCache(1,4,1,8,page_size=1,chunk_size=2)
+    q=torch.ones(1,1,8,device='cuda',dtype=c.dtype)
+    with c.prepare_decode([0],1) as p:
+        for value in (1,2,3):p.step(q,q,q*value)
+        before=c.materialize(0)
+        p.capture('step').capture('attend')
+        assert c.lengths==(3,)
+        assert torch.equal(before[0],c.materialize(0)[0]) and torch.equal(before[1],c.materialize(0)[1])
+        result=p.step(q,q,q*4,use_graph=True)
+        reference(c,result,q)
+        with pytest.raises(ValueError,match='max_seq_len'):p.step(q,q,q,use_graph=True)
+        assert c.lengths==(4,)
