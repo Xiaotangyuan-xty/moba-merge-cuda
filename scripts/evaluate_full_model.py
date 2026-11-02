@@ -24,6 +24,7 @@ import flash_attn
 import torch.nn.functional as F
 from transformers import AutoModelForCausalLM,AutoTokenizer
 from examples.full_qwen2 import FullQwen2Session
+from examples.retrieval_cases import retrieval_cases
 
 
 def sync_time(fn):
@@ -222,10 +223,47 @@ def profile_model(model,tokens,args,out):
     return dict(scope='diagnostic profiler; does not supply formal latency',rows=result)
 
 
+def retrieval(model,tokenizer):
+    cases=retrieval_cases(tokenizer)
+    rows=[]
+    for case in cases:
+        prefix=torch.tensor([case['tokens']],device='cuda')
+        answer=tokenizer.encode(' '+case['answer'],add_special_tokens=False)
+        for method in ('hf_sdpa','dense_eager','moba_k2_eager','moba_k4_eager','moba_k8_eager'):
+            def session():
+                return Native(model,'sdpa') if method=='hf_sdpa' else make_session(model,method,case['length']+40)
+            s=session()
+            try:
+                logits=prefill(s,prefix);s.prepare();loss=0.
+                for i,token in enumerate(answer):
+                    loss+=float(F.cross_entropy(logits[:,-1].float(),torch.tensor([token],device='cuda'),reduction='sum'))
+                    if i+1<len(answer):logits=s.step(token)
+            finally:s.close()
+            del s;gc.collect();torch.cuda.empty_cache()
+            s=session();generated=[]
+            try:
+                logits=prefill(s,prefix);s.prepare()
+                for i in range(16):
+                    token=int(logits[:,-1].argmax(-1))
+                    if token==tokenizer.eos_token_id:break
+                    generated.append(token)
+                    if i<15:logits=s.step(token)
+            finally:s.close()
+            text=tokenizer.decode(generated,skip_special_tokens=True)
+            found=re.search(r'(?<!\d)\d{4}(?!\d)',text)
+            row={k:v for k,v in case.items() if k!='tokens'}
+            row.update(method=method,answer_tokens=len(answer),answer_nll=loss,answer_mean_nll=loss/len(answer),
+                generated_ids=generated,generated_text=text,exact_match=bool(found and found.group()==case['answer']))
+            rows.append(row);print(json.dumps(row,ensure_ascii=False),flush=True)
+            del s;gc.collect();torch.cuda.empty_cache()
+    return dict(scope='six synthetic passkey diagnostics on a base model; not a general QA benchmark',
+                seed=20261102,max_new_tokens=16,methods=5,cases=6,rows=rows)
+
+
 def main():
     p=argparse.ArgumentParser()
     p.add_argument('--model',required=True);p.add_argument('--corpus',required=True)
-    p.add_argument('--stage',choices=['validate','quality','latency','profile'],required=True)
+    p.add_argument('--stage',choices=['validate','quality','latency','profile','retrieval'],required=True)
     p.add_argument('--out',required=True)
     p.add_argument('--quality-length',type=int,default=2048);p.add_argument('--quality-blocks',type=int,default=4)
     p.add_argument('--lengths',default='256,2048,8192')
@@ -253,6 +291,7 @@ def main():
         if args.stage=='validate':record['result']=validate(model,tokens)
         elif args.stage=='quality':record['result']=quality(model,tokens,args)
         elif args.stage=='latency':record['result']=paired_latency(model,tokens,args)
+        elif args.stage=='retrieval':record['result']=retrieval(model,tokenizer)
         else:record['result']=profile_model(model,tokens,args,out)
     record['status']='ok';out.write_text(json.dumps(record,indent=2)+'\n')
     print(json.dumps({k:v for k,v in record.items() if k!='result'}),flush=True)
