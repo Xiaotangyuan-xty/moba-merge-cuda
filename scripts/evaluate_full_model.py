@@ -120,7 +120,7 @@ def head_nll(model,h,ids):
 
 
 def quality(model,tokens,args):
-    methods=('hf_sdpa','dense_eager','moba_k2_eager','moba_k4_eager','moba_k8_eager','moba_k4_packed_eager')
+    methods=('hf_sdpa','hf_fa2','dense_eager','moba_k2_eager','moba_k4_eager','moba_k8_eager','moba_k4_packed_eager')
     rows=[]
     for offset in range(0,args.quality_blocks*args.quality_length,args.quality_length):
         ids=torch.tensor([tokens[offset:offset+args.quality_length]],device='cuda')
@@ -128,8 +128,8 @@ def quality(model,tokens,args):
         for method in methods:
             session=None
             try:
-                if method=='hf_sdpa':
-                    model.config._attn_implementation='sdpa'
+                if method in ('hf_sdpa','hf_fa2'):
+                    model.config._attn_implementation='sdpa' if method=='hf_sdpa' else 'flash_attention_2'
                     h=model.model(ids,use_cache=False).last_hidden_state
                 else:
                     session=make_session(model,method,args.quality_length+1)
@@ -147,12 +147,13 @@ def quality(model,tokens,args):
         window=tokens[block*args.quality_length:(block+1)*args.quality_length]
         prefix=window[:-32];targets=window[-32:]
         for method in methods:
-            s=Native(model,'sdpa') if method=='hf_sdpa' else make_session(model,method,len(window)+1)
+            s=Native(model,'sdpa' if method=='hf_sdpa' else 'flash_attention_2') if method in ('hf_sdpa','hf_fa2') else make_session(model,method,len(window)+1)
             try:
                 logits=prefill(s,torch.tensor([prefix],device='cuda'));s.prepare();loss=0.
                 for i,token in enumerate(targets):
                     loss+=float(F.cross_entropy(logits[:,-1].float(),torch.tensor([token],device='cuda'),reduction='sum'))
                     if i+1<len(targets):logits=s.step(token)
+                if not math.isfinite(loss):raise ValueError('nonfinite continuation loss')
                 continuation.append(dict(method=method,block=block,tokens=32,nll_sum=loss,mean_nll=loss/32,ppl=math.exp(loss/32)))
             finally:s.close()
             del s;gc.collect();torch.cuda.empty_cache()
@@ -166,17 +167,21 @@ def paired_latency(model,tokens,args):
     for length in map(int,args.lengths.split(',')):
         count=args.warmup+args.rounds*args.samples
         for method in candidates:
-            native=Native(model)
-            candidate=make_session(model,method,length+count+2)
+            native,base_init=sync_time(lambda:Native(model))
+            candidate,candidate_init=sync_time(lambda:make_session(model,method,length+count+2))
             ids=torch.tensor([tokens[:length]],device='cuda')
             try:
                 _,base_prefill=sync_time(lambda:prefill(native,ids))
                 _,candidate_prefill=sync_time(lambda:prefill(candidate,ids))
                 _,setup=sync_time(candidate.prepare)
-                samples=[]
+                samples=[];first_decode={}
                 for i,token in enumerate(tokens[length:length+count]):
                     if i<args.warmup:
-                        native.step(token);candidate.step(token);continue
+                        if i==0:
+                            _,first_decode['hf_fa2']=sync_time(lambda:native.step(token))
+                            _,first_decode[method]=sync_time(lambda:candidate.step(token))
+                        else:native.step(token);candidate.step(token)
+                        continue
                     r=(i-args.warmup)//args.samples;s=(i-args.warmup)%args.samples
                     order=('hf_fa2',method) if (r+s)%2==0 else (method,'hf_fa2')
                     for name in order:
@@ -186,6 +191,8 @@ def paired_latency(model,tokens,args):
                 cand_m=[statistics.median(x['wall_ms'] for x in samples if x['impl']==method and x['round']==r) for r in range(args.rounds)]
                 rows.append(dict(method=method,prefix=length,samples=samples,hf_prefill_ms=base_prefill,
                     candidate_prefill_ms=candidate_prefill,prepare_capture_ms=setup,
+                    hf_init_ms=base_init,candidate_init_ms=candidate_init,first_decode_ms=first_decode,
+                    hf_first_token_ms=base_init+base_prefill,candidate_first_token_ms=candidate_init+candidate_prefill,
                     semantic_dense_fastpath=getattr(candidate,'all_selected',False),
                     attention_backend='fa2' if getattr(candidate,'effective_dense',True) else 'moba_triton',
                     hf_step_ms=statistics.median(base_m),candidate_step_ms=statistics.median(cand_m),
