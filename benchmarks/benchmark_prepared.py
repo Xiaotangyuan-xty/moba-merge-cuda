@@ -9,6 +9,7 @@ import subprocess
 from datetime import datetime,timezone
 
 import torch
+from flash_attn import flash_attn_with_kvcache
 from moba_opt import PagedKVCache
 from ._decode_cab3 import PagedKVCache as Cab3Cache
 from .benchmark_decode import paired,stat
@@ -95,19 +96,36 @@ def measure(cfg,args,strict,graph):
     before=[t.data_ptr() for t in (new._table,new._lengths,p.scores,p.selected,p.output)]
     final=p.attend(q,use_graph=graph)
     compare(old.attend(q,sequence_ids=ids,topk=topk),final)
-    oracle=sampled_fp64(old,final,q) if cfg.get('fragmented') else None
-    assert before==[t.data_ptr() for t in (new._table,new._lengths,p.scores,p.selected,p.output)]
     name='prepared_graph' if graph else 'prepared_eager'
     records=paired({'cab3_eager':lambda:old.attend(q,sequence_ids=ids,topk=topk),
                     name:lambda:p.attend(q,use_graph=graph)},args.rounds,args.samples,args.warmup)
     compare(old.append_and_attend(q,k,v,sequence_ids=ids,topk=topk),p.step(q,k,v,use_graph=graph))
     steps=paired({'cab3_eager':lambda:old.append_and_attend(q,k,v,sequence_ids=ids,topk=topk),
                   name:lambda:p.step(q,k,v,use_graph=graph)},args.rounds,args.samples,args.warmup)
-    compare(old.attend(q,sequence_ids=ids,topk=topk),p.attend(q,use_graph=graph))
+    final=p.attend(q,use_graph=graph)
+    compare(old.attend(q,sequence_ids=ids,topk=topk),final)
+    oracle=sampled_fp64(old,final,q) if cfg.get('fragmented') else None
+    assert before==[t.data_ptr() for t in (new._table,new._lengths,p.scores,p.selected,p.output)]
     result={'attend':records,'step':steps,'summaries':{'attend':stat(records),'step':stat(steps)},
             'metadata_delta_uploads':p.delta_uploads,'append_calls':1+args.warmup+args.rounds*args.samples,
             'table_persistent':True,'graph_scope':'GPU compute; capacity/page planning and input copies outside'}
     result['sampled_fp64']=oracle
+    # Free the second full pool before reconstructing a dense FA reference.
+    # Reconstruction is outside timing and this is explicitly a distinct
+    # dense algorithm/core-call baseline, with no finite-value checking.
+    del old
+    gc.collect();torch.cuda.empty_cache()
+    lengths=cfg.get('lengths',[cfg['length']]*cfg['batch'])
+    shape=(cfg['batch'],max(lengths),cfg['kv_heads'],cfg['dim'])
+    dk=torch.empty(shape,device='cuda',dtype=q.dtype);dv=torch.empty_like(dk)
+    for sid,length in enumerate(lengths):
+        logical_k,logical_v=new.materialize(sid)
+        dk[sid,:length].copy_(logical_k[:length]);dv[sid,:length].copy_(logical_v[:length])
+        del logical_k,logical_v
+    dl=torch.tensor(lengths,device='cuda',dtype=torch.int32)
+    result['dense_reference']=paired({'dense_fa_core':lambda:flash_attn_with_kvcache(
+        q[:,None],dk,dv,cache_seqlens=dl,causal=True)},args.rounds,args.samples,args.warmup)
+    result['summaries']['dense_reference']=stat(result['dense_reference'])
     p.close()
     return result
 
