@@ -5,13 +5,16 @@
 - `opt_gqa_cuda`：原生 MHA/GQA/MQA prefill，head_dim=8..256（8 的倍数），支持前向与一阶梯度。
 - `PagedKVCache` / `ContiguousKVCache`：inference-only 增量 K/V、绝对 query 位置、逐 token/多 token decode、重置与页回收；Triton Attention 直接按页表读取物理 K/V，不重建全量连续 cache。
 - decode head_dim=1..256 的整数；BF16/FP16；页大小与 MoBA chunk 无需整除。
+- `prepare_decode`：固定活动请求、每步一个 token 的预分配执行接口，增量页表与 GPU 长度推进；支持显式 GPU 计算路径 CUDA Graph。默认保留 finite 检查，输出工作区会复用，详见 [准备/执行与 Graph 报告](docs/prepared_decode_20261102.md)。
 - prefill 阶段说明见 `docs/coverage_20261101.md`；decode API、边界和验收见 `docs/decode_paged_20261101.md`。
 
-2026-11-02 单 A40 最终完整回归：**485 项通过、2 项双卡测试按授权范围跳过**。
+2026-11-02 单 A40 最终完整回归：**515 项通过、2 项双卡测试按授权范围跳过**。已复用真实 Qwen2 架构预训练首层权重，完成 24 步 teacher-forced decode；未验证完整模型质量。
 
-decode 性能阶段已完成按请求路由、重复校验消除与 metadata 优化：对冻结 cache v1，28 配置×两轮的 `attend` / `append_and_attend` 几何平均分别改善 **1.321× / 1.661×**。dense FA 在两轮中仍快于当前 attend 的 22/28 配置；完整矩阵、基线与边界见 [性能报告](docs/decode_perf_20261102.md)。
+最新准备接口+Graph 对上一阶段 cab3 eager、相同严格检查契约，28 配置×两轮的 attend/step 几何平均分别改善 **2.017×/2.612×**。trusted 模式单列，不能与严格模式混用；仍有配置慢于 dense FA core。全部数据见准备/执行报告。
 
-下方加速数字属于历史 MHA 基线，不代表新 GQA/decode 的性能；完整模型服务、CUDA Graph 和 cache backward 不在当前声明范围。
+上一阶段按请求路由与 metadata 优化对冻结 cache v1 的结果为 **1.321×/1.661×**，保留在 [历史阶段报告](docs/decode_perf_20261102.md)，不与新基线混成同一数字。
+
+下方加速数字属于历史 MHA 基线，不代表新 GQA/decode 的性能；完整模型服务、完整模型全图 Graph 和 cache backward 不在当前声明范围。
 
 ## 历史 MHA 基线结果（56eedcd，不代表新 GQA/decode 的性能）
 

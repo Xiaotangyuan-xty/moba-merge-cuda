@@ -1,0 +1,93 @@
+{
+  "statistic": "median of round baseline/prepared median ratios; all config rows retained",
+  "runs": [
+    {
+      "input": "realistic_all.jsonl",
+      "git_head": "9dec24b68e793b6190909538c998fc24878bc2f3",
+      "groups": [
+        {
+          "contract": "strict",
+          "mode": "eager",
+          "configs": 6,
+          "workloads": {
+            "attend": {
+              "min": 1.3728760014083623,
+              "max": 1.4145887249933577,
+              "geomean": 1.3991434695698526,
+              "regression_ids": []
+            },
+            "step": {
+              "min": 1.7518074314857368,
+              "max": 5.061874608837386,
+              "geomean": 2.7953398158582785,
+              "regression_ids": []
+            }
+          }
+        },
+        {
+          "contract": "strict",
+          "mode": "graph",
+          "configs": 6,
+          "workloads": {
+            "attend": {
+              "min": 1.7927728323786782,
+              "max": 2.072666623298711,
+              "geomean": 1.970275335484118,
+              "regression_ids": []
+            },
+            "step": {
+              "min": 2.5464278196245687,
+              "max": 6.812651152248134,
+              "geomean": 4.000539135884336,
+              "regression_ids": []
+            }
+          }
+        },
+        {
+          "contract": "trusted",
+          "mode": "eager",
+          "configs": 6,
+          "workloads": {
+            "attend": {
+              "min": 1.4902505830017287,
+              "max": 1.5691691560047845,
+              "geomean": 1.5394454086335259,
+              "regression_ids": []
+            },
+            "step": {
+              "min": 2.189106673698573,
+              "max": 7.304136309352984,
+              "geomean": 3.768366252808202,
+              "regression_ids": []
+            }
+          },
+          "dense_core_faster_ids": [
+            "RAGGED",
+            "MQA128K"
+          ]
+        },
+        {
+          "contract": "trusted",
+          "mode": "graph",
+          "configs": 6,
+          "workloads": {
+            "attend": {
+              "min": 2.100277732396667,
+              "max": 2.6377033809497545,
+              "geomean": 2.4085314415031687,
+              "regression_ids": []
+            },
+            "step": {
+              "min": 4.216484089723527,
+              "max": 11.332848039074015,
+              "geomean": 6.651641812863577,
+              "regression_ids": []
+            }
+          },
+          "dense_core_faster_ids": []
+        }
+      ]
+    }
+  ],
+  "finite_contract": "strict vs strict; trusted vs trusted; FA core has no value checking/cache management"
+}

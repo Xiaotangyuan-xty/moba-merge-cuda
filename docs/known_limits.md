@@ -6,8 +6,8 @@
 D=8..256 且为 8 的倍数，BF16/FP16。完整契约和测试见 `coverage_20261101.md`。
 后续已实现连续/分页 KV cache 与增量 decode，详见 `decode_paged_20261101.md`。
 decode 独立支持 D=1..256 的整数；只做 inference，不支持 cache backward、
-跨 stream、CUDA Graph、共享前缀页/COW、滑动窗口或自动扩容。原生 GQA prefill 尚无新增正式性能结论；
-decode 相对冻结 cache v1 的 28 配置性能取证见 `decode_perf_20261102.md`。这不构成对 dense FlashAttention 的普遍加速：两轮均有 22/28 配置的 dense FA 更快。
+跨 stream、共享前缀页/COW、滑动窗口或自动扩容。普通 cache API 拒绝外部 capture；新增 PreparedDecode 支持固定活动请求的 GPU 计算路径 Graph，CPU 管理与完整模型全图不在捕获范围。接口、真实权重单层验证与最新性能见 `prepared_decode_20261102.md`。原生 GQA prefill 尚无新增正式性能结论；
+decode 旧阶段相对冻结 cache v1 的 28 配置性能取证见 `decode_perf_20261102.md`。最新 Prepared Graph trusted 模式仍有 14–15/28 配置慢于 dense FA core，不构成普遍加速结论；单层数值对齐不等于完整模型质量验证。
 
 ## 历史 MHA 基线支持范围（方案 2.4，56eedcd）
 

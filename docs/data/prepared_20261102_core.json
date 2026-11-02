@@ -1,0 +1,243 @@
+{
+  "statistic": "median of round baseline/prepared median ratios; all config rows retained",
+  "runs": [
+    {
+      "input": "matrix_r1.jsonl",
+      "git_head": "9dec24b68e793b6190909538c998fc24878bc2f3",
+      "groups": [
+        {
+          "contract": "strict",
+          "mode": "eager",
+          "configs": 28,
+          "workloads": {
+            "attend": {
+              "min": 1.321485745788408,
+              "max": 1.454553665592549,
+              "geomean": 1.4001643536539052,
+              "regression_ids": []
+            },
+            "step": {
+              "min": 1.3006784226039232,
+              "max": 4.616292980900505,
+              "geomean": 1.8196448098438698,
+              "regression_ids": []
+            }
+          }
+        },
+        {
+          "contract": "strict",
+          "mode": "graph",
+          "configs": 28,
+          "workloads": {
+            "attend": {
+              "min": 1.6189289276566226,
+              "max": 2.3673780888970763,
+              "geomean": 2.0252148543010247,
+              "regression_ids": []
+            },
+            "step": {
+              "min": 1.927194405487477,
+              "max": 6.359910985670864,
+              "geomean": 2.62073418030171,
+              "regression_ids": []
+            }
+          }
+        },
+        {
+          "contract": "trusted",
+          "mode": "eager",
+          "configs": 28,
+          "workloads": {
+            "attend": {
+              "min": 1.4075574673957874,
+              "max": 1.665944398435046,
+              "geomean": 1.5474104980679957,
+              "regression_ids": []
+            },
+            "step": {
+              "min": 1.4847741970666317,
+              "max": 6.452287218244665,
+              "geomean": 2.2326379695028167,
+              "regression_ids": []
+            }
+          },
+          "dense_core_faster_ids": [
+            "P01",
+            "P02",
+            "P03",
+            "P04",
+            "P05",
+            "P07",
+            "P08",
+            "P09",
+            "P10",
+            "P13",
+            "P14",
+            "M01",
+            "M02",
+            "M03",
+            "M04",
+            "M05",
+            "F01",
+            "F03"
+          ]
+        },
+        {
+          "contract": "trusted",
+          "mode": "graph",
+          "configs": 28,
+          "workloads": {
+            "attend": {
+              "min": 1.7739212730719027,
+              "max": 3.275863338216565,
+              "geomean": 2.507381450157575,
+              "regression_ids": []
+            },
+            "step": {
+              "min": 2.7855483848602676,
+              "max": 10.331313472684567,
+              "geomean": 4.039146091358663,
+              "regression_ids": []
+            }
+          },
+          "dense_core_faster_ids": [
+            "P01",
+            "P02",
+            "P03",
+            "P04",
+            "P07",
+            "P08",
+            "P13",
+            "P14",
+            "M01",
+            "M02",
+            "M03",
+            "M04",
+            "M05",
+            "F01",
+            "F03"
+          ]
+        }
+      ]
+    },
+    {
+      "input": "matrix_r2.jsonl",
+      "git_head": "9dec24b68e793b6190909538c998fc24878bc2f3",
+      "groups": [
+        {
+          "contract": "strict",
+          "mode": "eager",
+          "configs": 28,
+          "workloads": {
+            "attend": {
+              "min": 1.3257808140299494,
+              "max": 1.464907169782687,
+              "geomean": 1.4011223510920123,
+              "regression_ids": []
+            },
+            "step": {
+              "min": 1.2965657760266356,
+              "max": 4.667300312449642,
+              "geomean": 1.8248230496730073,
+              "regression_ids": []
+            }
+          }
+        },
+        {
+          "contract": "strict",
+          "mode": "graph",
+          "configs": 28,
+          "workloads": {
+            "attend": {
+              "min": 1.6037306749875981,
+              "max": 2.3288472013710826,
+              "geomean": 2.0093574692388714,
+              "regression_ids": []
+            },
+            "step": {
+              "min": 1.9190895903252216,
+              "max": 6.335254205243267,
+              "geomean": 2.603870895826143,
+              "regression_ids": []
+            }
+          }
+        },
+        {
+          "contract": "trusted",
+          "mode": "eager",
+          "configs": 28,
+          "workloads": {
+            "attend": {
+              "min": 1.4129768783029082,
+              "max": 1.6727757879520984,
+              "geomean": 1.5413080961134549,
+              "regression_ids": []
+            },
+            "step": {
+              "min": 1.4963622951531017,
+              "max": 6.513006118275318,
+              "geomean": 2.238253332686769,
+              "regression_ids": []
+            }
+          },
+          "dense_core_faster_ids": [
+            "P01",
+            "P02",
+            "P03",
+            "P04",
+            "P05",
+            "P07",
+            "P08",
+            "P09",
+            "P10",
+            "P13",
+            "P14",
+            "M01",
+            "M02",
+            "M03",
+            "M04",
+            "M05",
+            "F01",
+            "F03"
+          ]
+        },
+        {
+          "contract": "trusted",
+          "mode": "graph",
+          "configs": 28,
+          "workloads": {
+            "attend": {
+              "min": 1.7572760068126652,
+              "max": 3.1520067083044183,
+              "geomean": 2.483175628051583,
+              "regression_ids": []
+            },
+            "step": {
+              "min": 2.759286553639203,
+              "max": 10.340527448869752,
+              "geomean": 4.0226260559130536,
+              "regression_ids": []
+            }
+          },
+          "dense_core_faster_ids": [
+            "P01",
+            "P02",
+            "P03",
+            "P04",
+            "P07",
+            "P08",
+            "P13",
+            "M01",
+            "M02",
+            "M03",
+            "M04",
+            "M05",
+            "F01",
+            "F03"
+          ]
+        }
+      ]
+    }
+  ],
+  "finite_contract": "strict vs strict; trusted vs trusted; FA core has no value checking/cache management"
+}
