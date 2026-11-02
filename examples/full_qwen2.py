@@ -6,15 +6,17 @@ training, sliding window or dynamic active set. Graphs have fixed capacity.
 from contextlib import nullcontext
 import torch
 import torch.nn.functional as F
-from flash_attn import flash_attn_func
+from flash_attn import flash_attn_func,flash_attn_with_kvcache
 from transformers.models.qwen2.modeling_qwen2 import apply_rotary_pos_emb
 from moba_opt import PagedKVCache
 from moba_opt.grouped_attention import opt_gqa_cuda
+from moba_opt.ops import prepared_decode as step_ops
+from moba_opt.ops import paged_decode as page_ops
 
 
 class FullQwen2Session:
     def __init__(self,model,capacity,*,mode='dense',chunk=128,topk=4,
-                 backend='eager',fused_qkv=False,page=16):
+                 backend='eager',fused_qkv=False,page=16,dense_backend='fa2'):
         if mode not in ('dense','moba'):raise ValueError('mode')
         if backend not in ('eager','attention_graph','model_graph'):raise ValueError('backend')
         if model.config.model_type!='qwen2':raise ValueError('Qwen2 architecture required')
@@ -23,6 +25,10 @@ class FullQwen2Session:
             raise ValueError('eval model with gradients disabled required')
         self.model,self.capacity=model,int(capacity)
         self.mode,self.chunk,self.topk,self.backend=mode,chunk,topk,backend
+        if dense_backend not in ('fa2','triton'):raise ValueError('dense backend')
+        self.dense_backend=dense_backend
+        self.all_selected=mode=='moba' and (self.capacity+chunk-1)//chunk<=topk
+        self.effective_dense=mode=='dense' or self.all_selected
         self.fused_qkv=fused_qkv
         self.profile=False
         self.device=next(model.parameters()).device
@@ -36,6 +42,7 @@ class FullQwen2Session:
         self.caches=[PagedKVCache(1,capacity,self.hk,self.dim,page_size=page,chunk_size=chunk,
                         dtype=next(model.parameters()).dtype,device=self.device) for _ in model.model.layers]
         self.plans=[];self.graph=None;self.closed=False;self.failed=False
+        self.dense_views=[(c.k_cache.view(1,-1,self.hk,self.dim),c.v_cache.view(1,-1,self.hk,self.dim)) for c in self.caches]
         self.input=torch.zeros((1,1),device=self.device,dtype=torch.long)
         self.packed=[]
         if fused_qkv:
@@ -79,7 +86,7 @@ class FullQwen2Session:
             residual=h
             q,k,v=self.project(i,layer.input_layernorm(h),cos,sin)
             self.caches[i].append(k,v,sequence_ids=[0],cu_seqlens=[0,t])
-            if self.mode=='dense':out=flash_attn_func(q[None],k[None],v[None],causal=True)[0]
+            if self.effective_dense:out=flash_attn_func(q[None],k[None],v[None],causal=True)[0]
             else:out=opt_gqa_cuda(q,k,v,cu,t,dict(chunk_size=self.chunk,topk=self.topk))
             h=residual+layer.self_attn.o_proj(out.reshape(1,t,-1))
             h=h+layer.mlp(layer.post_attention_layernorm(h))
@@ -90,9 +97,9 @@ class FullQwen2Session:
         self.check()
         if self.plans:raise ValueError('already prepared')
         if not self.caches[0].lengths[0]:raise ValueError('prefill first')
-        self.plans=[c.prepare_decode([0],self.hq,mode=self.mode,topk=self.topk,check_finite=False)
+        self.plans=[c.prepare_decode([0],self.hq,mode='dense' if self.effective_dense else self.mode,topk=self.topk,check_finite=False)
                     for c in self.caches]
-        if self.backend=='attention_graph':
+        if self.backend=='attention_graph' and not (self.effective_dense and self.dense_backend=='fa2'):
             for p in self.plans:p.capture('step')
         elif self.backend=='model_graph':self.capture_model()
 
@@ -107,7 +114,15 @@ class FullQwen2Session:
                 q,k,v=self.project(i,layer.input_layernorm(h),cos,sin)
                 p.q.copy_(q);p.k.copy_(k);p.v.copy_(v)
             with self.scope('model/cache_attention'):
-                if self.backend=='attention_graph':p._run('step',True)
+                if self.effective_dense and self.dense_backend=='fa2':
+                    c=p.cache
+                    step_ops.metadata(c._table,c._lengths,p.gpu_ids,p.positions,p.delta,True)
+                    page_ops.append_tokens(p.k,p.v,c.k_cache,c.v_cache,c._table,p.gpu_ids,p.positions)
+                    step_ops.step_means(c.k_cache,c._table,c._means,p.gpu_ids,p.positions,c.chunk_size)
+                    dk,dv=self.dense_views[i]
+                    out=flash_attn_with_kvcache(p.q[:,None],dk,dv,cache_seqlens=c._lengths,causal=True,num_splits=1)
+                    p.output.copy_(out[:,0])
+                elif self.backend=='attention_graph':p._run('step',True)
                 else:p._compute(True)
             with self.scope('model/output_projection'):
                 h=residual+layer.self_attn.o_proj(p.output.reshape(1,1,-1))
