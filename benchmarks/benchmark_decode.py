@@ -18,7 +18,7 @@ import time
 from unittest.mock import patch
 
 import torch
-from flash_attn import flash_attn_with_kvcache
+from flash_attn import flash_attn_func, flash_attn_with_kvcache
 
 from moba_opt import PagedKVCache
 from moba_opt.ops import paged_decode
@@ -71,32 +71,23 @@ def stat(records):
     return result
 
 
-def fixed_route_gather_fa(cache, q, ids, positions, selected):
-    """Same selected tokens, GPU-only gather/pack then FA decode, including gather.
+def fixed_route_gather_fa(cache, q, ids, selected):
+    """Full selected blocks: direct GPU gather then FA, including gather cost.
 
-    Each query-head becomes an independent one-head FA batch item. Padding is
-    sorted to the end and excluded with cache_seqlens. No CPU route readback.
+    Harness checks full blocks outside timing. Each query-head becomes a
+    one-head FA batch item. No padding sort, length creation or route readback.
     """
     nq, hq, d = q.shape
     c = cache.chunk_size
     token = selected[..., None].long() * c + torch.arange(c, device=q.device)
-    valid = (selected[..., None] >= 0) & (token <= positions[:, None, None, None])
     token = token.flatten(2)
-    valid = valid.flatten(2)
-    order = torch.argsort((~valid).int(), dim=-1, stable=True)
-    token = token.gather(-1, order).clamp_min(0)
-    # Invalid tokens use a known legal slot; FA excludes them via lengths.
-    packed_valid = valid.gather(-1, order)
-    token = torch.where(packed_valid, token, 0)
     page = cache._table[ids[:, None, None].long(), token // cache.k_cache.shape[1]]
     kh = (torch.arange(hq, device=q.device) // (hq // cache.num_kv_heads))[None, :, None]
     keys = cache.k_cache[page.long(), token % cache.k_cache.shape[1], kh]
     values = cache.v_cache[page.long(), token % cache.k_cache.shape[1], kh]
-    lengths = valid.sum(-1).reshape(-1).int()
-    out = flash_attn_with_kvcache(q.reshape(nq*hq, 1, 1, d),
-                                 keys.reshape(nq*hq, -1, 1, d),
-                                 values.reshape(nq*hq, -1, 1, d),
-                                 cache_seqlens=lengths, causal=False)
+    out = flash_attn_func(q.reshape(nq*hq, 1, 1, d),
+                         keys.reshape(nq*hq, -1, 1, d),
+                         values.reshape(nq*hq, -1, 1, d),causal=False)
     return out.reshape_as(q)
 
 
@@ -106,7 +97,8 @@ def _routes(result):
 
 def validate_pair(a, b):
     assert torch.equal(_routes(a), _routes(b)), "route mismatch; timing aborted"
-    torch.testing.assert_close(a.output, b.output, atol=0.02, rtol=0.02)
+    tol=0.02 if a.output.dtype==torch.bfloat16 else 0.002
+    torch.testing.assert_close(a.output, b.output, atol=tol, rtol=tol)
     torch.testing.assert_close(a.lse, b.lse, atol=5e-4, rtol=2e-5)
 
 
@@ -176,13 +168,15 @@ def measure(cfg, args, out_dir):
     gpu_ids = torch.tensor(ids, dtype=torch.int32, device="cuda")
     positions = torch.full_like(gpu_ids, cfg["length"]-1)
     selected = outputs["current"].selected_blocks
+    assert bool((selected>=0).all()) and cfg["length"]%cfg["chunk"]==0
     stage_funcs = {"direct_paged": lambda: paged_decode.paged_attention(
         q, current.k_cache, current.v_cache, current._table, current._lengths,
         gpu_ids, positions, selected, torch.empty_like(q), torch.empty(q.shape[:2],device="cuda"),
         cfg["chunk"], False),
-        "gather_fa": lambda: fixed_route_gather_fa(current,q,gpu_ids,positions,selected)}
+        "gather_fa": lambda: fixed_route_gather_fa(current,q,gpu_ids,selected)}
     gathered = stage_funcs["gather_fa"]()
-    torch.testing.assert_close(gathered, outputs["current"].output, atol=0.02, rtol=0.02)
+    tol=0.02 if q.dtype==torch.bfloat16 else 0.002
+    torch.testing.assert_close(gathered, outputs["current"].output, atol=tol, rtol=tol)
     attention = paired(stage_funcs, args.rounds, args.samples, args.warmup)
     # Equal-length fixture was allocated in sequence order. These views are
     # dense logical KV without materializing another full cache.
@@ -193,7 +187,7 @@ def measure(cfg, args, out_dir):
     dense_fn = lambda: flash_attn_with_kvcache(q[:,None],dense_k,dense_v,
                                              cache_seqlens=dense_lens,causal=True)
     torch.testing.assert_close(dense_fn()[:,0],current.attend(q,sequence_ids=ids,mode="dense").output,
-                               atol=0.02,rtol=0.02)
+                               atol=tol,rtol=tol)
     dense = paired({"dense_fa_distinct_algorithm":dense_fn},args.rounds,args.samples,args.warmup)
     profiles = {}
     cache = None
@@ -246,6 +240,8 @@ def main():
     config=json.loads(Path(args.config).read_text())
     ids=None if args.ids=="all" else set(args.ids.split(","))
     if ids and ids-set(c["id"] for c in config):raise SystemExit("unknown config IDs")
+    trace_dir=out.parent/(out.stem+"_traces")
+    if args.profile:trace_dir.mkdir(exist_ok=False)
     for cfg in config:
         if ids and cfg["id"] not in ids:continue
         base={"config":cfg,"baseline_sha":BASELINE_SHA,"seed":args.seed,
@@ -253,11 +249,13 @@ def main():
               "timestamp_utc":datetime.now(timezone.utc).isoformat(),
               "git_head":subprocess.check_output(["git","rev-parse","HEAD"],text=True).strip(),
               "working_tree_dirty":bool(subprocess.check_output(["git","status","--porcelain"],text=True).strip()),
-              "config_sha256":hashlib.sha256(Path(args.config).read_bytes()).hexdigest(),
+            "config_sha256":hashlib.sha256(Path(args.config).read_bytes()).hexdigest(),
+              "harness_version":2,
+              "fixed_route_baseline":"full-block gather + flash_attn_func, no padding sort",
               "torch":torch.__version__,"gpu":torch.cuda.get_device_name(),
               "metric":"median of round medians; stream events include host idle gaps"}
         try:
-            with torch.inference_mode():base.update(status="ok",**measure(cfg,args,out.parent))
+            with torch.inference_mode():base.update(status="ok",**measure(cfg,args,trace_dir))
         except Exception as exc:
             base.update(status="failed",error=repr(exc))
             with out.open("a") as f:f.write(json.dumps(base)+"\n")

@@ -32,6 +32,8 @@ def summarize(path, configs):
         raise ValueError(f"{path}: expected all {len(configs)} configs exactly once")
     heads={x["git_head"] for x in raw}
     if len(heads)!=1:raise ValueError("mixed implementation commits")
+    versions={x.get("harness_version",1) for x in raw}
+    if len(versions)!=1:raise ValueError("mixed benchmark harness versions")
     rows=[]
     for cid,cfg in configs.items():
         x=by_id[cid]
@@ -51,7 +53,7 @@ def summarize(path, configs):
         d=metrics(x["dense_reference"],["dense_fa_distinct_algorithm"],x["rounds"],x["samples"])
         row["dense_fa_wall_ms"]=statistics.median(d["dense_fa_distinct_algorithm"]["wall_ms"])
         rows.append(row)
-    aggregate={"input":path.name,"git_head":next(iter(heads)),"config_count":len(rows),
+    aggregate={"input":path.name,"git_head":next(iter(heads)),"harness_version":next(iter(versions)),"config_count":len(rows),
                "all_config_ids":list(configs),"workloads":{}}
     for workload in ("attend","append_and_attend"):
         values=[r[f"{workload}_wall_ms_speedup"] for r in rows]
