@@ -59,13 +59,14 @@ def test_metadata_is_packed_and_combined_api_reuses_gpu_query_indices():
     kv=torch.ones(3,1,8,device="cuda",dtype=cache.dtype)
     with patch.object(cache,"_gpu",wraps=cache._gpu) as copies:
         result=cache.append_and_attend(q,kv,kv,sequence_ids=[1,0],cu_seqlens=[0,2,3])
-    assert copies.call_count==1
+    assert copies.call_count==2  # large 2-D page table + packed small vectors
     assert result.sequence_ids==(1,1,0) and result.positions==(0,1,0)
     with patch.object(cache,"_gpu",wraps=cache._gpu) as copies:
         again=cache.attend(q,sequence_ids=[1,1,0],positions=[0,1,0])
     assert copies.call_count==1
     torch.testing.assert_close(result.output,again.output)
-    assert cache._table.untyped_storage().data_ptr()==cache._lengths.untyped_storage().data_ptr()
+    assert torch.equal(cache._table.cpu(),torch.tensor(cache.page_table,dtype=torch.int32))
+    assert torch.equal(cache._lengths.cpu(),torch.tensor(cache.lengths,dtype=torch.int32))
 
 
 @pytest.mark.parametrize("bad_name",["q","k","v"])

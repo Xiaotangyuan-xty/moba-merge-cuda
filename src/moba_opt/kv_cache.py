@@ -164,11 +164,12 @@ class PagedKVCache:
         plan = self._layout.plan_append(ids, counts)
         # All metadata allocated before writing invisible new slots. Candidate
         # IDs are now implicit per request; no global candidate list is copied.
-        flat_table = [page for row in plan.tables for page in row]
-        table, lengths, token_ids, positions, closed_ids, closed_chunks = self._metadata(
-            flat_table, plan.lengths, plan.token_sequences, plan.token_positions,
+        # Keep the large 2-D table on torch's native nested-sequence conversion
+        # path. Flattening it in Python erased the H2D savings at large B/L.
+        table = self._gpu(plan.tables)
+        lengths, token_ids, positions, closed_ids, closed_chunks = self._metadata(
+            plan.lengths, plan.token_sequences, plan.token_positions,
             [p[0] for p in plan.completed_chunks], [p[1] for p in plan.completed_chunks])
-        table = table.view(self._layout.batch_size, self._layout.table_width)
         candidate_count = self._count_candidates(plan.lengths)
         kernels.append_tokens(k.contiguous(), v.contiguous(), self.k_cache, self.v_cache,
                               table, token_ids, positions)
@@ -262,9 +263,7 @@ class PagedKVCache:
             replacement.tables, replacement.lengths, replacement.free_pages = old.tables, old.lengths, old.free_pages
             replacement.version = old.version
             replacement.reset(ids)
-            table, lengths = self._metadata([p for row in replacement.tables for p in row],
-                                             replacement.lengths)
-            table = table.view(old.batch_size, old.table_width)
+            table, lengths = self._gpu(replacement.tables), self._gpu(replacement.lengths)
             candidate_count = self._count_candidates(replacement.lengths)
             self._layout, self._table, self._lengths = replacement, table, lengths
             self._candidate_count = candidate_count
