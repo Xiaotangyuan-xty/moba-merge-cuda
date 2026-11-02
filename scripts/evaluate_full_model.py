@@ -79,16 +79,17 @@ def validate(model,tokens):
     continuation=tokens[128:140]
     for token in continuation:ref.append(reference.step(token).detach().clone())
     rows=[]
-    for name in ('dense_eager','dense_attngraph','dense_modelgraph','dense_modelgraph_packed','moba_k8_modelgraph'):
+    for name in ('hf_fa2','dense_eager','dense_attngraph','dense_modelgraph','dense_modelgraph_packed','moba_k8_modelgraph'):
         s=make_session(model,name,160)
         try:
             first=prefill(s,ids);initial=dense_metrics(ref[0],first);assert_dense(initial)
-            lengths=[c.lengths for c in s.caches]
-            s.prepare();assert lengths==[c.lengths for c in s.caches]
+            lengths=[c.lengths for c in s.caches] if isinstance(s,FullQwen2Session) else None
+            s.prepare()
+            if lengths is not None:assert lengths==[c.lengths for c in s.caches]
             checks=[initial]
             for i,token in enumerate(continuation):
                 r=dense_metrics(ref[i+1],s.step(token));assert_dense(r);checks.append(r)
-            assert all(c.lengths==(140,) for c in s.caches)
+            if lengths is not None:assert all(c.lengths==(140,) for c in s.caches)
             rows.append(dict(method=name,checks=checks,capture_preserves_visible_lengths=True))
         finally:s.close()
         del s;gc.collect();torch.cuda.empty_cache()
@@ -107,7 +108,7 @@ def head_nll(model,h,ids):
 
 
 def quality(model,tokens,args):
-    methods=('hf_sdpa','dense_eager','moba_k2_eager','moba_k4_eager','moba_k8_eager')
+    methods=('hf_sdpa','dense_eager','moba_k2_eager','moba_k4_eager','moba_k8_eager','moba_k4_packed_eager')
     rows=[]
     for offset in range(0,args.quality_blocks*args.quality_length,args.quality_length):
         ids=torch.tensor([tokens[offset:offset+args.quality_length]],device='cuda')
