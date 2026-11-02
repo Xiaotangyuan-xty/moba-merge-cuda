@@ -74,12 +74,27 @@ def main():
         logical_k,logical_v=[k.cpu()],[v.cpu()]
         hf_cache=DynamicCache()
         causal=torch.full((args.prefix,args.prefix),torch.finfo(torch.bfloat16).min,device='cuda').triu(1)[None,None]
+        hf_eager=layer(prefix,position_embeddings=(cos[:,:args.prefix],sin[:,:args.prefix]),
+                       attention_mask=causal,past_key_value=DynamicCache())[0]
+        # HF eager materializes BF16 QK logits; SDPA/FA and our kernel retain
+        # FP32 score accumulation. Keep eager drift as diagnostic evidence and
+        # independently check the raw Attention result against CPU FP64.
+        config._attn_implementation='sdpa'
         hf_prefill=layer(prefix,position_embeddings=(cos[:,:args.prefix],sin[:,:args.prefix]),
                          attention_mask=causal,past_key_value=hf_cache)[0]
         p=sparse.prepare_decode([0],hq,topk=4,check_finite=True)
         pd=dense.prepare_decode([0],hq,mode='dense',check_finite=True)
         p.capture('step');pd.capture('step')
-        dense_tail=output_projection(layer,pd.attend(q[-1:]).output)
+        tail=pd.attend(q[-1:])
+        exact,exact_lse=decode_reference(q[-1:],logical_k,logical_v,[0],[args.prefix-1],chunk_size=8)
+        torch.testing.assert_close(tail.output.cpu().double(),exact,atol=0.02,rtol=0.02)
+        torch.testing.assert_close(tail.lse.cpu().double(),exact_lse,atol=5e-4,rtol=2e-5)
+        dense_tail=output_projection(layer,tail.output)
+        prefill_diagnostics=dict(
+            raw_dense_vs_fp64_max_abs=float((tail.output.cpu().double()-exact).abs().max()),
+            hf_eager_vs_sdpa_max_abs=float((hf_eager-hf_prefill).abs().max()),
+            hf_eager_vs_sdpa_relative_l2=float(torch.linalg.vector_norm((hf_eager-hf_prefill).float())/torch.linalg.vector_norm(hf_prefill.float()).clamp_min(1e-8)))
+        print(json.dumps({'prefill_diagnostics':prefill_diagnostics}),flush=True)
         tol=0.03
         torch.testing.assert_close(dense_tail,hf_prefill[:,-1],atol=tol,rtol=tol)
         for i in range(args.steps):
@@ -114,6 +129,7 @@ def main():
         p.close();pd.close()
     record=dict(status='ok',model_label=args.model_label,checkpoint_revision=root.name,
         config_sha256=hashlib.sha256((root/'config.json').read_bytes()).hexdigest(),tensor_hashes=hashes,
+        hf_dense_reference='transformers Qwen2Attention SDPA',prefill_diagnostics=prefill_diagnostics,
         selected_weight_and_embedding_bytes=read_bytes,q_heads=hq,kv_heads=hk,head_dim=d,
         prefix=args.prefix,steps=args.steps,teacher_forced=True,checks=checks,layer_wall_samples=timings,
         sparse_vs_dense_relative_l2=sparse_dense,scope='pretrained layer0 Attention only; no MLP/full model/logits/generation quality claim',
