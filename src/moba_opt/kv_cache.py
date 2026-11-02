@@ -136,6 +136,14 @@ class PagedKVCache:
     def _gpu(self, data):
         return torch.tensor(data, dtype=torch.int32, device=self.device)
 
+    def _metadata(self, *vectors):
+        """One H2D copy; returned views keep the packed storage alive."""
+        data, sizes = [], []
+        for vector in vectors:
+            sizes.append(len(vector))
+            data.extend(vector)
+        return self._gpu(data).split(sizes)
+
     def _reject_storage_alias(self, *tensors):
         pools = {self.k_cache.untyped_storage().data_ptr(), self.v_cache.untyped_storage().data_ptr()}
         if any(t.untyped_storage().data_ptr() in pools for t in tensors):
@@ -149,17 +157,18 @@ class PagedKVCache:
             self._tensor(v, "v", expected_heads=self.num_kv_heads, expected_tokens=k.shape[0])
             self._reject_storage_alias(k, v)
             ids, counts = self._append_counts(k.shape[0], sequence_ids, cu_seqlens)
-            return self._append_validated(k, v, ids, counts)
+            return self._append_validated(k, v, ids, counts)[0]
 
     def _append_validated(self, k, v, ids, counts):
         """Internal: caller holds lock/device/stream and validated all inputs."""
         plan = self._layout.plan_append(ids, counts)
         # All metadata allocated before writing invisible new slots. Candidate
         # IDs are now implicit per request; no global candidate list is copied.
-        table, lengths = self._gpu(plan.tables), self._gpu(plan.lengths)
-        token_ids, positions = self._gpu(plan.token_sequences), self._gpu(plan.token_positions)
-        closed_ids = self._gpu([p[0] for p in plan.completed_chunks])
-        closed_chunks = self._gpu([p[1] for p in plan.completed_chunks])
+        flat_table = [page for row in plan.tables for page in row]
+        table, lengths, token_ids, positions, closed_ids, closed_chunks = self._metadata(
+            flat_table, plan.lengths, plan.token_sequences, plan.token_positions,
+            [p[0] for p in plan.completed_chunks], [p[1] for p in plan.completed_chunks])
+        table = table.view(self._layout.batch_size, self._layout.table_width)
         candidate_count = self._count_candidates(plan.lengths)
         kernels.append_tokens(k.contiguous(), v.contiguous(), self.k_cache, self.v_cache,
                               table, token_ids, positions)
@@ -168,7 +177,7 @@ class PagedKVCache:
         self._layout.commit(plan)
         self._table, self._lengths = table, lengths
         self._candidate_count = candidate_count
-        return AppendResult(plan.token_sequences, plan.token_positions)
+        return AppendResult(plan.token_sequences, plan.token_positions), token_ids, positions
 
     def _query_metadata(self, q, sequence_ids, positions):
         self._tensor(q, "q")
@@ -210,9 +219,9 @@ class PagedKVCache:
             ids, pos = self._query_metadata(q, sequence_ids, positions)
             return self._attend_validated(q, ids, pos, topk, dense)
 
-    def _attend_validated(self, q, ids, pos, topk, dense):
+    def _attend_validated(self, q, ids, pos, topk, dense, gpu_metadata=None):
         q = q.contiguous()
-        gpu_ids, gpu_pos = self._gpu(ids), self._gpu(pos)
+        gpu_ids, gpu_pos = self._metadata(ids, pos) if gpu_metadata is None else gpu_metadata
         selected = None if dense else self._route(q, gpu_ids, gpu_pos, topk,
                                                  max(pos) // self.chunk_size)
         out = torch.empty_like(q)
@@ -236,8 +245,9 @@ class PagedKVCache:
             if q.shape[0] * q.shape[1] >= 2**31:
                 raise ValueError("query grid exceeds int32 capacity")
             ids, counts = self._append_counts(k.shape[0], sequence_ids, cu_seqlens)
-            info = self._append_validated(k, v, ids, counts)
-            return self._attend_validated(q, info.sequence_ids, info.positions, topk, dense)
+            info, gpu_ids, gpu_pos = self._append_validated(k, v, ids, counts)
+            return self._attend_validated(q, info.sequence_ids, info.positions, topk, dense,
+                                          gpu_metadata=(gpu_ids, gpu_pos))
 
     @torch.no_grad()
     def reset(self, sequence_ids=None):
@@ -252,7 +262,9 @@ class PagedKVCache:
             replacement.tables, replacement.lengths, replacement.free_pages = old.tables, old.lengths, old.free_pages
             replacement.version = old.version
             replacement.reset(ids)
-            table, lengths = self._gpu(replacement.tables), self._gpu(replacement.lengths)
+            table, lengths = self._metadata([p for row in replacement.tables for p in row],
+                                             replacement.lengths)
+            table = table.view(old.batch_size, old.table_width)
             candidate_count = self._count_candidates(replacement.lengths)
             self._layout, self._table, self._lengths = replacement, table, lengths
             self._candidate_count = candidate_count

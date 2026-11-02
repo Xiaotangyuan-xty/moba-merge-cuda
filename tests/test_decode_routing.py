@@ -53,6 +53,21 @@ def test_combined_api_checks_each_tensor_once():
     assert [c.args[1] for c in checked.call_args_list]==["k","v","q"]
 
 
+def test_metadata_is_packed_and_combined_api_reuses_gpu_query_indices():
+    cache=PagedKVCache(2,16,1,8,page_size=3,chunk_size=4)
+    q=torch.ones(3,4,8,device="cuda",dtype=cache.dtype)
+    kv=torch.ones(3,1,8,device="cuda",dtype=cache.dtype)
+    with patch.object(cache,"_gpu",wraps=cache._gpu) as copies:
+        result=cache.append_and_attend(q,kv,kv,sequence_ids=[1,0],cu_seqlens=[0,2,3])
+    assert copies.call_count==1
+    assert result.sequence_ids==(1,1,0) and result.positions==(0,1,0)
+    with patch.object(cache,"_gpu",wraps=cache._gpu) as copies:
+        again=cache.attend(q,sequence_ids=[1,1,0],positions=[0,1,0])
+    assert copies.call_count==1
+    torch.testing.assert_close(result.output,again.output)
+    assert cache._table.untyped_storage().data_ptr()==cache._lengths.untyped_storage().data_ptr()
+
+
 @pytest.mark.parametrize("bad_name",["q","k","v"])
 def test_combined_api_still_rejects_nonfinite_before_append(bad_name):
     cache=PagedKVCache(1,8,1,8,page_size=3,chunk_size=4)
