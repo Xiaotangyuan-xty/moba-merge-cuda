@@ -13,12 +13,42 @@ def rand(shape, dtype, seed):
     return torch.randn(shape, generator=torch.Generator().manual_seed(seed)).to("cuda", dtype)
 
 
+def assert_payload(cache,sid,k,v):
+    actual_k,actual_v=cache.materialize(sid)
+    assert torch.equal(actual_k,k), "cached K differs from original input"
+    assert torch.equal(actual_v,v), "cached V differs from original input"
+
+
 def check(cache, result, q):
     keys, values = [], []
     for sid in range(len(cache.lengths)):
         k, v = cache.materialize(sid)
         keys.append(k)
         values.append(v)
+        closed=cache.lengths[sid]//cache.chunk_size
+        if closed:
+            expected_means=k[:closed*cache.chunk_size].cpu().double().reshape(
+                closed,cache.chunk_size,cache.num_kv_heads,cache.head_dim).mean(1).to(cache.dtype).double()
+            torch.testing.assert_close(cache._means[sid,:closed].cpu().double(),expected_means,
+                                       atol=1e-5,rtol=0.01 if cache.dtype==torch.bfloat16 else 0.002)
+    if result.selected_blocks is not None:
+        route=result.selected_blocks.cpu()
+        qc=q.cpu().double()
+        for row,(sid,pos) in enumerate(zip(result.sequence_ids,result.positions)):
+            history=pos//cache.chunk_size
+            for head in range(q.shape[1]):
+                chosen=[int(c) for c in route[row,head,1:].tolist() if c>=0]
+                assert len(chosen)==min(history,route.shape[-1]-1)
+                if not chosen or len(chosen)==history:continue
+                kvhead=head//(q.shape[1]//cache.num_kv_heads)
+                means=cache._means[sid,:history,kvhead].cpu().double()
+                scores=(means*qc[row,head]).sum(-1)
+                rest=[i for i in range(history) if i not in chosen]
+                # Independent FP64 ranking of the actual stored representatives;
+                # allow a conservative FP32 dot-product rounding bound at ties.
+                bound=max(1e-6,float((means*qc[row,head]).abs().sum(-1).max())
+                          *4*torch.finfo(torch.float32).eps*cache.head_dim)
+                assert float(scores[chosen].min())+bound>=float(scores[rest].max())
     expected, lse = decode_reference(q, keys, values, result.sequence_ids, result.positions,
                                       chunk_size=cache.chunk_size, selected_blocks=result.selected_blocks)
     out = result.output.cpu().double()
@@ -38,11 +68,17 @@ def test_incremental_decode(kind,dtype,hq,hk):
     cache=kind(2,32,hk,64,chunk_size=4,dtype=dtype,**kwargs)
     k,v=rand((9,hk,64),dtype,101),rand((9,hk,64),dtype,102)
     cache.append(k,v,sequence_ids=[0,1],cu_seqlens=[0,4,9])
+    stored_k,stored_v=[k[:4],k[4:]],[v[:4],v[4:]]
+    for sid in range(2):assert_payload(cache,sid,stored_k[sid],stored_v[sid])
     for step in range(3):
         q=rand((2,hq,64),dtype,103+step)
         k=rand((2,hk,64),dtype,113+step)
         v=rand((2,hk,64),dtype,123+step)
         result=cache.append_and_attend(q,k,v,sequence_ids=[0,1],topk=2)
+        for sid in range(2):
+            stored_k[sid]=torch.cat((stored_k[sid],k[sid:sid+1]))
+            stored_v[sid]=torch.cat((stored_v[sid],v[sid:sid+1]))
+            assert_payload(cache,sid,stored_k[sid],stored_v[sid])
         check(cache,result,q)
         check(cache,cache.attend(q,sequence_ids=[0,1],mode="dense"),q)
 
@@ -51,8 +87,10 @@ def test_incremental_decode(kind,dtype,hq,hk):
 @pytest.mark.parametrize("dtype",[torch.bfloat16,torch.float16])
 def test_decode_head_dimensions(dim,dtype):
     cache=PagedKVCache(2,64,2,dim,page_size=7,chunk_size=12,dtype=dtype)
-    cache.append(rand((68,2,dim),dtype,131),rand((68,2,dim),dtype,132),
+    k,v=rand((68,2,dim),dtype,131),rand((68,2,dim),dtype,132)
+    cache.append(k,v,
                  sequence_ids=[0,1],cu_seqlens=[0,27,68])
+    assert_payload(cache,0,k[:27],v[:27]);assert_payload(cache,1,k[27:],v[27:])
     q=rand((3,4,dim),dtype,133)
     for mode in ("moba","dense"):
         result=cache.attend(q,sequence_ids=[0,1,1],positions=[26,40,5],topk=2,mode=mode)
@@ -63,7 +101,9 @@ def test_decode_head_dimensions(dim,dtype):
 def test_pages_and_moba_chunks_need_not_align(page):
     cache=PagedKVCache(1,97,2,80,page_size=page,chunk_size=24)
     cache.k_cache.fill_(float("nan"));cache.v_cache.fill_(float("nan"))
-    cache.append(rand((79,2,80),cache.dtype,141),rand((79,2,80),cache.dtype,142),sequence_ids=[0],cu_seqlens=[0,79])
+    k,v=rand((79,2,80),cache.dtype,141),rand((79,2,80),cache.dtype,142)
+    cache.append(k,v,sequence_ids=[0],cu_seqlens=[0,79])
+    assert_payload(cache,0,k,v)
     q=rand((2,8,80),cache.dtype,143)
     for topk in (1,2,9):
         check(cache,cache.attend(q,sequence_ids=[0,0],positions=[0,78],topk=topk),q)
@@ -92,6 +132,7 @@ def test_chunked_append_is_causal():
                  sequence_ids=[0,1],cu_seqlens=[0,5,12])
     result=cache.append_and_attend(q,torch.cat((k[5:9],k[16:])),torch.cat((v[5:9],v[16:])),
                                    sequence_ids=[0,1],cu_seqlens=[0,4,7],topk=2)
+    assert_payload(cache,0,k[:9],v[:9]);assert_payload(cache,1,k[9:],v[9:])
     assert result.positions==(5,6,7,8,7,8,9)
     check(cache,result,q)
     # Changing data after seq0 position 5 must not affect its query at 5.
@@ -202,8 +243,10 @@ def test_extreme_logits_use_stable_online_softmax():
 @pytest.mark.parametrize("dtype",[torch.bfloat16,torch.float16])
 def test_decode_unaligned_head_dimensions(dim,dtype):
     cache=PagedKVCache(2,32,2,dim,page_size=3,chunk_size=6,dtype=dtype)
-    cache.append(rand((35,2,dim),dtype,251),rand((35,2,dim),dtype,252),
+    k,v=rand((35,2,dim),dtype,251),rand((35,2,dim),dtype,252)
+    cache.append(k,v,
                  sequence_ids=[1,0],cu_seqlens=[0,17,35])
+    assert_payload(cache,1,k[:17],v[:17]);assert_payload(cache,0,k[17:],v[17:])
     q=rand((3,4,dim),dtype,253)
     for mode in ("dense","moba"):
         check(cache,cache.attend(q,sequence_ids=[0,1,0],positions=[17,16,0],topk=2,mode=mode),q)
