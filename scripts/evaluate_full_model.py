@@ -19,6 +19,8 @@ import time
 os.environ.setdefault('TOKENIZERS_PARALLELISM','false')
 os.environ.setdefault('RAYON_NUM_THREADS','2')
 import torch
+import transformers
+import flash_attn
 import torch.nn.functional as F
 from transformers import AutoModelForCausalLM,AutoTokenizer
 from examples.full_qwen2 import FullQwen2Session
@@ -31,6 +33,7 @@ def sync_time(fn):
 
 def dense_metrics(ref,out):
     a,b=ref.float(),out.float()
+    if not bool(torch.isfinite(a).all()) or not bool(torch.isfinite(b).all()):raise ValueError('nonfinite logits')
     la,lb=F.log_softmax(a,-1),F.log_softmax(b,-1)
     return dict(max_abs=float((a-b).abs().max()),relative_l2=float(torch.linalg.vector_norm(a-b)/torch.linalg.vector_norm(a).clamp_min(1e-8)),
                 kl=float((la.exp()*(la-lb)).sum(-1).mean()),top1_agreement=float((a.argmax(-1)==b.argmax(-1)).float().mean()))
@@ -104,6 +107,7 @@ def head_nll(model,h,ids):
         end=min(n,start+128)
         logits=model.lm_head(h[:,start:end]).float()
         total+=float(F.cross_entropy(logits.reshape(-1,logits.shape[-1]),ids[:,start+1:end+1].reshape(-1),reduction='sum'))
+    if not math.isfinite(total):raise ValueError('nonfinite NLL')
     return total,n
 
 
@@ -229,10 +233,13 @@ def main():
     model=AutoModelForCausalLM.from_pretrained(args.model,local_files_only=True,trust_remote_code=False,
         torch_dtype=torch.bfloat16,attn_implementation='sdpa').cuda().eval().requires_grad_(False)
     record=dict(stage=args.stage,model='Qwen/Qwen2.5-0.5B',dtype='bf16',batch=1,corpus_sha256=hashlib.sha256(raw).hexdigest(),
+        model_revision='060db6499f32faf8b98477b0a26969ef7d8b9987',
+        model_weight_sha256='88c142557820ccad55bb59756bfcfcf891de9cc6202816bd346445188a0ed342',
         model_config_sha256=hashlib.sha256((Path(args.model)/'config.json').read_bytes()).hexdigest(),
         finite_contract='finite internal QKV assumed by both HF and custom model integration',
         git_head=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),
-        dirty=bool(subprocess.check_output(['git','status','--porcelain'],text=True).strip()),torch=torch.__version__)
+        dirty=bool(subprocess.check_output(['git','status','--porcelain'],text=True).strip()),torch=torch.__version__,
+        transformers=transformers.__version__,flash_attn=flash_attn.__version__,gpu=torch.cuda.get_device_name())
     with torch.inference_mode():
         if args.stage=='validate':record['result']=validate(model,tokens)
         elif args.stage=='quality':record['result']=quality(model,tokens,args)

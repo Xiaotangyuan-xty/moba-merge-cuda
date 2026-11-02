@@ -18,6 +18,7 @@ class FullQwen2Session:
         if mode not in ('dense','moba'):raise ValueError('mode')
         if backend not in ('eager','attention_graph','model_graph'):raise ValueError('backend')
         if model.config.model_type!='qwen2':raise ValueError('Qwen2 architecture required')
+        if getattr(model.config,'use_sliding_window',False):raise ValueError('sliding window unsupported')
         if model.training or any(p.requires_grad for p in model.parameters()):
             raise ValueError('eval model with gradients disabled required')
         self.model,self.capacity=model,int(capacity)
@@ -25,6 +26,9 @@ class FullQwen2Session:
         self.fused_qkv=fused_qkv
         self.profile=False
         self.device=next(model.parameters()).device
+        if self.device.type!='cuda':raise ValueError('CUDA model required')
+        if backend=='model_graph' and 'dynamic' in model.model.rotary_emb.rope_type:
+            raise ValueError('dynamic RoPE is not supported by the fixed Graph path')
         self.stream=torch.cuda.current_stream(self.device).cuda_stream
         self.hq=model.config.num_attention_heads
         self.hk=model.config.num_key_value_heads
@@ -64,8 +68,9 @@ class FullQwen2Session:
     def prefill_hidden(self,ids):
         self.check()
         if self.plans or any(c.lengths[0] for c in self.caches):raise ValueError('fresh session required')
-        if ids.shape[0]!=1 or ids.dim()!=2 or not 0<ids.shape[1]<self.capacity:
+        if ids.dim()!=2 or ids.shape[0]!=1 or not 0<ids.shape[1]<self.capacity:
             raise ValueError('batch=1, nonempty prefix below capacity required')
+        if ids.device!=self.device or ids.dtype!=torch.long:raise ValueError('CUDA int64 token IDs required')
         t=ids.shape[1]
         h=self.model.model.embed_tokens(ids)
         cos,sin=self.model.model.rotary_emb(h,torch.arange(t,device=self.device)[None])
