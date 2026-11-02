@@ -76,28 +76,35 @@ def prefill(session,ids):
 
 def validate(model,tokens):
     ids=torch.tensor([tokens[:128]],device='cuda')
-    model.config._attn_implementation='sdpa'
-    reference=Native(model,'sdpa');reference.prefill(ids)
-    ref=[reference.model(ids,use_cache=False,logits_to_keep=1).logits.detach().clone()]
     continuation=tokens[128:140]
-    for token in continuation:ref.append(reference.step(token).detach().clone())
+    references={}
+    for backend in ('sdpa','flash_attention_2'):
+        reference=Native(model,backend)
+        ref=[reference.prefill(ids).detach().clone()]
+        for token in continuation:ref.append(reference.step(token).detach().clone())
+        references[backend]=ref;reference.close()
+    envelope=[dense_metrics(a,b) for a,b in zip(references['sdpa'],references['flash_attention_2'])]
+    print(json.dumps({'native_sdpa_vs_fa2':envelope}),flush=True)
+    ref=references['flash_attention_2']
     rows=[]
     for name in ('hf_fa2','dense_eager','dense_attngraph','dense_modelgraph','dense_modelgraph_packed','moba_k8_modelgraph'):
         s=make_session(model,name,160)
         try:
-            first=prefill(s,ids);initial=dense_metrics(ref[0],first);assert_dense(initial)
+            first=prefill(s,ids);initial=dense_metrics(ref[0],first)
+            print(json.dumps({'validation_method':name,'position':127,**initial}),flush=True);assert_dense(initial)
             lengths=[c.lengths for c in s.caches] if isinstance(s,FullQwen2Session) else None
             s.prepare()
             if lengths is not None:assert lengths==[c.lengths for c in s.caches]
             checks=[initial]
             for i,token in enumerate(continuation):
-                r=dense_metrics(ref[i+1],s.step(token));assert_dense(r);checks.append(r)
+                r=dense_metrics(ref[i+1],s.step(token))
+                print(json.dumps({'validation_method':name,'position':128+i,**r}),flush=True);assert_dense(r);checks.append(r)
             if lengths is not None:assert all(c.lengths==(140,) for c in s.caches)
             rows.append(dict(method=name,checks=checks,capture_preserves_visible_lengths=True))
         finally:s.close()
         del s;gc.collect();torch.cuda.empty_cache()
-    reference.close()
     return dict(scope='pretrained full model; fixed teacher-forced dense/all-selected comparisons',
+                primary_reference='native HF FA2',native_sdpa_vs_fa2=envelope,
                 tolerance=dict(relative_l2=0.02,kl=0.002,max_abs=0.5),prefix=128,steps=12,methods=rows)
 
 
@@ -229,7 +236,7 @@ def main():
     torch.cuda.set_per_process_memory_fraction(6*1024**3/torch.cuda.get_device_properties(0).total_memory)
     torch.manual_seed(20261102)
     tokenizer=AutoTokenizer.from_pretrained(args.model,local_files_only=True,trust_remote_code=False)
-    raw=Path(args.corpus).read_bytes();tokens=tokenizer.encode(raw.decode(),add_special_tokens=False)
+    raw=Path(args.corpus).read_bytes();tokens=tokenizer.encode(raw.decode(),add_special_tokens=False,verbose=False)
     model=AutoModelForCausalLM.from_pretrained(args.model,local_files_only=True,trust_remote_code=False,
         torch_dtype=torch.bfloat16,attn_implementation='sdpa').cuda().eval().requires_grad_(False)
     record=dict(stage=args.stage,model='Qwen/Qwen2.5-0.5B',dtype='bf16',batch=1,corpus_sha256=hashlib.sha256(raw).hexdigest(),
