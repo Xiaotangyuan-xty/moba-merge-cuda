@@ -22,8 +22,8 @@ class PreparedDecode:
             if not isinstance(check_finite,bool):raise ValueError("check_finite must be bool")
             self.dense=_mode(mode,topk)
             self.cache=cache
-            self.state=IncrementalLayout(cache._layout,_ints(sequence_ids,"sequence_ids"))
-            self.ids=self.state.ids
+            self._state=IncrementalLayout(cache._layout,_ints(sequence_ids,"sequence_ids"))
+            self.ids=self._state.ids
             b,h,d=len(self.ids),self.num_q_heads,cache.head_dim
             width=max(1,(cache._layout.max_seq_len-1)//cache.chunk_size)
             if b*h*width>=2**31:raise ValueError("route score grid exceeds int32 capacity")
@@ -31,7 +31,7 @@ class PreparedDecode:
             self.check_finite=check_finite
             self.closed=False
             self.failed=False
-            self.graphs={}
+            self._graphs={}
             self.delta_uploads=0
             kw=dict(device=cache.device,dtype=cache.dtype)
             self.q=torch.zeros((b,h,d),**kw)
@@ -53,10 +53,12 @@ class PreparedDecode:
             cache._prepared_owner=self
 
     @property
-    def lengths(self):return tuple(self.state.lengths)
+    def lengths(self):
+        with self.cache._lock:return tuple(self._state.lengths)
 
     @property
-    def page_table(self):return tuple(map(tuple,self.state.tables))
+    def page_table(self):
+        with self.cache._lock:return tuple(map(tuple,self._state.tables))
 
     def _check(self):
         if self.closed or self.cache._prepared_owner is not self:
@@ -108,7 +110,7 @@ class PreparedDecode:
 
     def _run(self,kind,use_graph):
         try:
-            if use_graph:self.graphs[kind].replay()
+            if use_graph:self._graphs[kind].replay()
             else:self._compute(kind=="step")
         except Exception:
             self.failed=True
@@ -122,9 +124,9 @@ class PreparedDecode:
         with self.cache._lock,torch.cuda.device(self.cache.device):
             self._check()
             self._input(q,self.q,"q")
-            pos=tuple(self.state.lengths[s]-1 for s in self.ids)
+            pos=tuple(self._state.lengths[s]-1 for s in self.ids)
             if min(pos)<0:raise ValueError("query positions must refer to cached tokens")
-            if use_graph and "attend" not in self.graphs:raise ValueError("capture('attend') first")
+            if use_graph and "attend" not in self._graphs:raise ValueError("capture('attend') first")
             if q is not self.q:self.q.copy_(q)
             self._run("attend",use_graph)
             return self._result(pos)
@@ -136,8 +138,8 @@ class PreparedDecode:
             self._check()
             for tensor,target,name in ((q,self.q,"q"),(k,self.k,"k"),(v,self.v,"v")):
                 self._input(tensor,target,name)
-            if use_graph and "step" not in self.graphs:raise ValueError("capture('step') first")
-            plan=self.state.plan()
+            if use_graph and "step" not in self._graphs:raise ValueError("capture('step') first")
+            plan=self._state.plan()
             for tensor,target in ((q,self.q),(k,self.k),(v,self.v)):
                 if tensor is not target:target.copy_(tensor)
             self._upload(plan)
@@ -145,7 +147,7 @@ class PreparedDecode:
             except Exception:
                 self.failed=True
                 raise
-            self.state.commit(plan)
+            self._state.commit(plan)
             return self._result(plan.positions)
 
     @torch.no_grad()
@@ -155,9 +157,9 @@ class PreparedDecode:
         c=self.cache
         with c._lock,torch.cuda.device(c.device):
             self._check()
-            if kind in self.graphs:raise ValueError("graph already captured")
-            plan=self.state.plan() if kind=="step" else None
-            if kind=="attend" and any(self.state.lengths[s]==0 for s in self.ids):
+            if kind in self._graphs:raise ValueError("graph already captured")
+            plan=self._state.plan() if kind=="step" else None
+            if kind=="attend" and any(self._state.lengths[s]==0 for s in self.ids):
                 raise ValueError("attend capture requires nonempty cached sequences")
             snapshots=[t.clone() for t in (c._table,c._lengths,c._means,self.delta)]
             uploads=self.delta_uploads
@@ -173,7 +175,7 @@ class PreparedDecode:
                 torch.cuda.current_stream(c.device).wait_stream(stream)
                 graph=torch.cuda.CUDAGraph()
                 with torch.cuda.graph(graph,stream=stream):self._compute(kind=="step")
-                self.graphs[kind]=graph
+                self._graphs[kind]=graph
             finally:
                 torch.cuda.current_stream(c.device).wait_stream(stream)
                 for target,snapshot in zip((c._table,c._lengths,c._means,self.delta),snapshots):
@@ -189,10 +191,10 @@ class PreparedDecode:
                 raise ValueError("cross-stream cache access is unsupported")
             if self.failed:self.cache._invalid=True
             else:
-                self.state.publish(self.cache._layout)
-                self.cache._candidate_count=self.cache._count_candidates(self.state.lengths)
+                self._state.publish(self.cache._layout)
+                self.cache._candidate_count=self.cache._count_candidates(self._state.lengths)
             self.cache._prepared_owner=None
-            self.graphs.clear()
+            self._graphs.clear()
             self.closed=True
 
     def __enter__(self):return self
