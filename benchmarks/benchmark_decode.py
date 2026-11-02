@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 import gc
 import hashlib
 import json
+import os
 from pathlib import Path
 import statistics
 import subprocess
@@ -118,11 +119,16 @@ def fixture(cfg, extra, seed):
     args = (b, length+extra, hk, d)
     kwargs = dict(page_size=cfg["page"], chunk_size=cfg["chunk"], dtype=dtype)
     caches = {"v1": FrozenCache(*args, **kwargs), "current": PagedKVCache(*args, **kwargs)}
-    k, v = rand((b*length, hk, d)), rand((b*length, hk, d))
     ids = list(range(b))
-    for cache in caches.values():
-        cache.append(k, v, sequence_ids=ids, cu_seqlens=[i*length for i in range(b+1)])
-    del k, v
+    # Bound setup workspace too: full input tensors plus isfinite temporaries
+    # can otherwise exceed the shared-node ceiling before timing even begins.
+    for sid in ids:
+        for lo in range(0,length,2048):
+            n=min(2048,length-lo)
+            k,v=rand((n,hk,d)),rand((n,hk,d))
+            for cache in caches.values():
+                cache.append(k,v,sequence_ids=[sid],cu_seqlens=[0,n])
+            del k,v
     q = rand((b, cfg["q_heads"], d))
     kn, vn = rand((b, hk, d)), rand((b, hk, d))
     return caches, q, kn, vn, ids
@@ -222,6 +228,12 @@ def main():
     p.add_argument("--profile",action="store_true")
     args=p.parse_args()
     if min(args.rounds,args.samples,args.warmup)<1:raise SystemExit("positive counts required")
+    # Leave room for CUDA context and library allocations below the monitor's
+    # device-wide limit. This bounds PyTorch's caching allocator independently.
+    allocator_mib=min(6144,int(os.environ.get("MOBA_BATCH_LIMIT_MIB","8192"))-1024)
+    if allocator_mib<=0:raise SystemExit("insufficient approved memory budget")
+    torch.cuda.set_per_process_memory_fraction(allocator_mib*1024**2/
+                                               torch.cuda.get_device_properties(0).total_memory)
     out=Path(args.out)
     if out.exists():raise SystemExit("Output exists; choose a new path")
     out.parent.mkdir(parents=True,exist_ok=True)
