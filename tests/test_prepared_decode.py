@@ -107,3 +107,27 @@ def test_capture_after_live_steps_and_graph_capacity_boundary():
         reference(c,result,q)
         with pytest.raises(ValueError,match='max_seq_len'):p.step(q,q,q,use_graph=True)
         assert c.lengths==(4,)
+
+
+def test_graph_closes_large_chunk_at_maximum_head_dimension():
+    c=PagedKVCache(1,1026,1,256,page_size=7,chunk_size=1024)
+    k,v=rand((1023,1,256),c.dtype,801),rand((1023,1,256),c.dtype,802)
+    c.append(k,v,sequence_ids=[0],cu_seqlens=[0,1023])
+    q=rand((1,4,256),c.dtype,803);kn,vn=k[:1],v[:1]
+    with c.prepare_decode([0],4) as p:
+        p.capture('step')
+        reference(c,p.step(q,kn,vn,use_graph=True),q)
+        expected=torch.cat((k,kn)).float().mean(0).to(c.dtype)
+        torch.testing.assert_close(c._means[0,0],expected,atol=1e-5,rtol=0.01)
+
+
+def test_bound_input_buffers_support_graph_without_staging_copies():
+    c=PagedKVCache(1,8,1,1,page_size=4,chunk_size=2)
+    with c.prepare_decode([0],1,check_finite=False) as p:
+        p.q.fill_(1);p.k.fill_(1);p.v.fill_(2)
+        p.capture('step')
+        for _ in range(3):
+            result=p.step(p.q,p.k,p.v,use_graph=True)
+            assert torch.equal(result.output,torch.full_like(result.output,2))
+        assert p.delta_uploads==1
+        with pytest.raises(ValueError,match='owns cache'):c.prepare_decode([0],1)
