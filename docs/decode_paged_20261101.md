@@ -1,7 +1,7 @@
 # 增量 decode、KV cache 与直接分页 Attention
 
 开始日期：2026-11-01，验收日期：2026-11-02。本阶段代码从 Mac 提交到 GitHub，服务器只同步代码并计算验证。
-状态：实现与测试用例已建立；最终验收结果在实验完成后填入。
+状态：功能与正确性验收完成。最终完整回归 **464 项通过、2 项双卡测试跳过**；尚无新 decode 路径的正式性能结论。
 
 ## 接口与语义
 
@@ -54,10 +54,35 @@ cache.reset([0])  # 结束该 batch slot 的请求并回收其物理页。
 
 CPU 测试覆盖页分配计划、容量失败无状态变更、陈旧计划、重置和非连续页复用；独立 FP64 参考只读取逻辑 K/V 和 query 位置，不复用页表或在线 softmax。
 
-GPU 测试覆盖连续与分页 cache、逐 token 和多 token append、GQA/MQA、32 个对齐 D 和 15 个非对齐 D×两种 dtype、非整除 page/chunk、页回收、因果和请求隔离、对原 prefill 最后一行对照、8K 上下文、极端 logits、chunk_size 1/1024、max topk=9、不规则头数，以及显式错误边界。代码中包含的测试不是已通过声明，最终结果以保存的日志/XML 为准。
+GPU 测试覆盖连续与分页 cache、逐 token 和多 token append、GQA/MQA、32 个对齐 D 和 15 个非对齐 D×两种 dtype、非整除 page/chunk、页回收、因果和请求隔离、对原 prefill 最后一行对照、8K 上下文、极端 logits、chunk_size 1/1024、max topk=9、不规则头数，以及显式错误边界。D=1..256 是接口支持范围，实际抽测 47 个不同 D，不声称穷举所有形状组合。
 
-初轮 decode 103 项通过；加入非对齐 D 和 ragged/max-topk 后 134 项通过。旧 prefill 与首轮 cache 的整体验证为 431 通过/2 个双卡项跳过。最终版本还需包含追加 storage 别名保护后的统一回归，以下以最终记录为准。
+验证链分开检查原始 K/V 写入、路由和 attention：主要参数化与增量测试要求缓存读回和原始 K/V 逐元素相同；完整块均值对照 FP64 均值后量化值；路由合法性、数量与独立 FP64 打分排名交叉检查（近似 tie 允许保守的 FP32 dot 舍入界）；固定实际选块后，输出/LSE 再对照独立 FP64 attention。另有无 tie 的构造用例检查逐 query-head 选块规则。
 
-本批只获准物理 GPU1；预计设备显存上限 8 GiB、GPU 进程累计墙钟上限 20 分钟。每轮检查显存及进程，发现其他任务进入目标卡时只停止本批自身进程组。结果和源码 hash 保存在 `results/decode_paged_20261101/`。
+## 最终验收记录
+
+- 最终运行代码：`6ebfc72e541ef0ab3070ceeb4d115c6de760d776`，2026-11-02。后续验收文档提交不改变被测源码。
+- 收集 **466** 项：**464 通过、2 跳过**。其中新增 CPU allocator/reference 测试 23 项、新增 GPU decode 测试 136 项全部通过；原 prefill、梯度及合并测试一并回归。2 个跳过项是已有双卡设备绑定测试，本批未获双卡授权。
+- 最终 pytest 耗时 **144.64 秒**，守护进程记录的该轮进程墙钟 **145.94 秒**。仅有既有诊断路径 `index_reduce` beta API 提示，未出现测试失败。
+- 初轮 103 项 decode、初版统一回归 431 通过/2 跳过、非对齐 D 补充 134 项 decode 的记录保留；最终声明以上述完整回归为准，不将不同版本通过数相加。
+- 仅使用物理 GPU1（A40）；4 轮 GPU 进程累计墙钟 **313.31 秒**，低于获准的 1,200 秒。1 秒采样记录的设备显存峰值 **3,273 MiB**，低于本批监控限额 8,192 MiB；这不是精确的瞬时峰值测量。
+- 每轮先检查显存与进程并绑定目标卡；监控发现他人进程/超额时只终止自身进程组。本批无冲突中断，结束后目标卡 0 MiB、无本批 GPU 进程。未使用其他 GPU 或改动他人进程。
+- 复用现有 Torch/FlashAttention/Triton 环境；没有新增依赖或下载模型。CPU/编译线程上限 2，任务使用 nice=10。
+- pytest 日志：`logs/decode_paged_20261101/decode_final_suite.log`；JUnit：`results/decode_paged_20261101/final_suite.xml`；资源、源码 hash 与提交记录：`results/decode_paged_20261101/gpu_budget.json`（这些机器相关证据不入公开仓库）。
+
+## 复现
+
+先取得当批 GPU 许可，并在忽略的 `scripts/env.local.sh` 中配置已批准的物理 GPU1 UUID、`MOBA_BATCH_ID`、累计时间和显存限额；共享节点纪律见 README。脚本只接受物理 GPU1，不会自动换卡。保留已有预算记录，重复运行使用新 tag，避免覆盖证据。
+
+```bash
+source scripts/env.sh
+# CPU 安全检查，不初始化可见 GPU：
+CUDA_VISIBLE_DEVICES="" nice -n 10 python -m pytest tests/test_cache_layout.py -q
+# 仅在当批许可和私有环境配置完成后：
+python scripts/run_shared_gpu_batch.py --tag decode_recheck_01 -- \
+  python -m pytest tests/ -q -x --durations=10 \
+  --junitxml="results/${MOBA_BATCH_ID}/decode_recheck_01.xml"
+```
+
+上述 GPU 命令需要已有原始 fixture 与冻结的 third_party 上游；缺少 fixture 时部分原有测试会跳过，应核对跳过原因，不能直接沿用 464/2 的验收数字。本批未运行 compute-sanitizer。
 
 本阶段不把旧 MHA 的加速数字外推到新 decode kernel。正确性与接口支持验证完成后，才另做公平性能矩阵。

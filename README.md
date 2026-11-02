@@ -7,9 +7,11 @@
 - decode head_dim=1..256 的整数；BF16/FP16；页大小与 MoBA chunk 无需整除。
 - prefill 阶段说明见 `docs/coverage_20261101.md`；decode API、边界和验收见 `docs/decode_paged_20261101.md`。
 
+2026-11-02 单 A40 完整回归：**464 项通过、2 项双卡测试按授权范围跳过**（含新增 23 项 CPU 和 136 项 GPU decode 测试）。
+
 下方加速数字属于历史 MHA 基线，不代表新 GQA/decode 的性能；完整模型服务、CUDA Graph 和 cache backward 不在当前声明范围。
 
-## 历史 MHA 基线结果（56eedcd，不代表本次 GQA 加速）
+## 历史 MHA 基线结果（56eedcd，不代表新 GQA/decode 的性能）
 
 状态：完成（经一轮外部审查修订）。**主结果**：CUDA 全局 softmax 合并替换官方 PyTorch 合并路径，单 A40 上完整 Attention 前向提速 1.123–1.455×、前反向合计 1.062–1.129×（24 组配对几何平均 1.088×；统计口径：轮中位数的跨轮中位数），反向不变，峰值显存持平（独立进程复测），129 项测试全过，选块与官方逐位一致。技术报告：`docs/report.md`。
 
@@ -33,13 +35,17 @@ src/moba_opt/
   api.py               # 实现注册/统一入口（official / official_nvtx / opt_merge_atomic / opt_merge_cuda）
   baseline_adapter.py  # 冻结基线调用 + 支持范围校验
   mixed_attention.py   # 优化 autograd 路径（官方路由与反向，替换前向合并）
+  grouped_attention.py # 原生 GQA/MQA prefill 与一阶反向
+  cache_layout.py      # CPU 逻辑页分配、容量预检、重置和回收
+  kv_cache.py          # 连续/分页 KV cache 与增量 decode API
   diagnostic.py        # 带 record_function 阶段标记的诊断副本（含路由/合并 hook）
   ops/merge.cu         # CUDA 主贡献：原子建图 + warp-per-row 全局 softmax 合并
   ops/bindings.cpp     # pybind 绑定与输入检查
   ops/merge_cuda.py    # 扩展 JIT 加载器
   ops/merge_triton.py  # Triton 参考实现（验证期；含确定性 torch 建图）
-reference/             # FP64 固定路由参考、合并数学参考、路由导出
-tests/                 # 127 项：参考自验证 / 子算子 / fixture 交叉 / 完整路径（两个后端）
+  ops/paged_decode.py  # Triton 增量写入、完整块均值、路由打分和直接分页 Attention
+reference/             # FP64 固定路由/分组/decode 参考、合并数学参考、路由导出
+tests/                 # prefill/梯度、合并子算子、KV 分页、decode 与错误边界
 benchmarks/            # 配对计时（AB/BA）、kernel/stage 基准、分阶段 profiling
 configs/               # core12 / supplementary / smoke / correctness
 scripts/               # env.sh、check_environment、smoke、summarize_results
