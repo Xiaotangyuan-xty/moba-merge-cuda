@@ -73,7 +73,8 @@ def main():
         for c in (sparse,old,dense):c.append(k,v,sequence_ids=[0],cu_seqlens=[0,args.prefix])
         logical_k,logical_v=[k.cpu()],[v.cpu()]
         hf_cache=DynamicCache()
-        causal=torch.full((args.prefix,args.prefix),torch.finfo(torch.bfloat16).min,device='cuda').triu(1)[None,None]
+        causal=torch.full((args.prefix,args.prefix),torch.finfo(torch.bfloat16).min,
+                          device='cuda',dtype=torch.bfloat16).triu(1)[None,None]
         hf_eager=layer(prefix,position_embeddings=(cos[:,:args.prefix],sin[:,:args.prefix]),
                        attention_mask=causal,past_key_value=DynamicCache())[0]
         # HF eager materializes BF16 QK logits; SDPA/FA and our kernel retain
@@ -81,7 +82,7 @@ def main():
         # independently check the raw Attention result against CPU FP64.
         config._attn_implementation='sdpa'
         hf_prefill=layer(prefix,position_embeddings=(cos[:,:args.prefix],sin[:,:args.prefix]),
-                         attention_mask=causal,past_key_value=hf_cache)[0]
+                         attention_mask=None,past_key_value=hf_cache)[0]
         p=sparse.prepare_decode([0],hq,topk=4,check_finite=True)
         pd=dense.prepare_decode([0],hq,mode='dense',check_finite=True)
         p.capture('step');pd.capture('step')
