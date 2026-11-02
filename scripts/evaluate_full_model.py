@@ -63,6 +63,8 @@ class Native:
 
 def make_session(model,name,capacity):
     if name=='hf_fa2':return Native(model)
+    if not re.fullmatch(r'(dense|moba_k[1-9])_((packed_)?(eager|attngraph|modelgraph)|(eager|attngraph|modelgraph)_packed)',name):
+        raise ValueError('unknown method: '+name)
     mode='moba' if name.startswith('moba') else 'dense'
     topk=int(re.search(r'k(\d+)',name).group(1)) if mode=='moba' else 4
     backend='model_graph' if 'modelgraph' in name else 'attention_graph' if 'attngraph' in name else 'eager'
@@ -277,6 +279,10 @@ def main():
     p.add_argument('--methods',default='dense_eager,dense_modelgraph,moba_k2_modelgraph,moba_k4_modelgraph,moba_k8_modelgraph,moba_k4_modelgraph_packed')
     p.add_argument('--rounds',type=int,default=3);p.add_argument('--samples',type=int,default=10);p.add_argument('--warmup',type=int,default=5)
     args=p.parse_args();out=Path(args.out)
+    if min(args.rounds,args.samples,args.warmup,args.quality_blocks)<1 or args.quality_length<2:
+        raise SystemExit('positive counts and quality length >=2 required')
+    requested=args.methods.split(',')
+    if len(requested)!=len(set(requested)) or 'hf_fa2' in requested:raise SystemExit('duplicate/reference candidate')
     if out.exists():raise SystemExit('preserve existing evidence')
     out.parent.mkdir(parents=True,exist_ok=True)
     torch.set_num_threads(2)
