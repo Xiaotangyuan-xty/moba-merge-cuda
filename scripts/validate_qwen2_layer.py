@@ -12,9 +12,11 @@ import subprocess
 import time
 
 import torch
+import transformers
+import safetensors
 from safetensors import safe_open
 from transformers import AutoTokenizer,Qwen2Config,DynamicCache
-from transformers.models.qwen2.modeling_qwen2 import Qwen2Attention,Qwen2RMSNorm,Qwen2RotaryEmbedding
+from transformers.models.qwen2.modeling_qwen2 import Qwen2Attention,Qwen2RMSNorm,Qwen2RotaryEmbedding,eager_attention_forward,repeat_kv
 from examples.qwen2_attention import project_qkv,output_projection,decode_layer
 from moba_opt import PagedKVCache
 from benchmarks._decode_cab3 import PagedKVCache as Cab3Cache
@@ -83,6 +85,17 @@ def main():
         config._attn_implementation='sdpa'
         hf_prefill=layer(prefix,position_embeddings=(cos[:,:args.prefix],sin[:,:args.prefix]),
                          attention_mask=None,past_key_value=hf_cache)[0]
+        q4=q.view(1,args.prefix,hq,d).transpose(1,2)
+        k4=k.view(1,args.prefix,hk,d).transpose(1,2)
+        v4=v.view(1,args.prefix,hk,d).transpose(1,2)
+        reproduced,_=eager_attention_forward(layer,q4,k4,v4,causal,scaling=layer.scaling,dropout=0.0)
+        reproduced=layer.o_proj(reproduced.reshape(1,args.prefix,-1))
+        torch.testing.assert_close(reproduced,hf_eager,atol=0,rtol=0)
+        fp32_scores=q4.float()@repeat_kv(k4.float(),hq//hk).transpose(-2,-1)*layer.scaling
+        fp32_prob=torch.softmax(fp32_scores+causal.float(),dim=-1)
+        fp32_raw=(fp32_prob@repeat_kv(v4.float(),hq//hk)).transpose(1,2).contiguous()
+        fp32_projected=layer.o_proj(fp32_raw.to(torch.bfloat16).reshape(1,args.prefix,-1))
+        torch.testing.assert_close(fp32_projected,hf_prefill,atol=0.03,rtol=0.03)
         p=sparse.prepare_decode([0],hq,topk=4,check_finite=True)
         pd=dense.prepare_decode([0],hq,mode='dense',check_finite=True)
         p.capture('step');pd.capture('step')
@@ -93,6 +106,8 @@ def main():
         dense_tail=output_projection(layer,tail.output)
         prefill_diagnostics=dict(
             raw_dense_vs_fp64_max_abs=float((tail.output.cpu().double()-exact).abs().max()),
+            manual_bf16_vs_hf_eager_max_abs=float((reproduced-hf_eager).abs().max()),
+            manual_fp32_vs_hf_sdpa_max_abs=float((fp32_projected-hf_prefill).abs().max()),
             hf_eager_vs_sdpa_max_abs=float((hf_eager-hf_prefill).abs().max()),
             hf_eager_vs_sdpa_relative_l2=float(torch.linalg.vector_norm((hf_eager-hf_prefill).float())/torch.linalg.vector_norm(hf_prefill.float()).clamp_min(1e-8)))
         print(json.dumps({'prefill_diagnostics':prefill_diagnostics}),flush=True)
@@ -131,6 +146,7 @@ def main():
     record=dict(status='ok',model_label=args.model_label,checkpoint_revision=root.name,
         config_sha256=hashlib.sha256((root/'config.json').read_bytes()).hexdigest(),tensor_hashes=hashes,
         hf_dense_reference='transformers Qwen2Attention SDPA',prefill_diagnostics=prefill_diagnostics,
+        torch_version=torch.__version__,transformers_version=transformers.__version__,safetensors_version=safetensors.__version__,
         selected_weight_and_embedding_bytes=read_bytes,q_heads=hq,kv_heads=hk,head_dim=d,
         prefix=args.prefix,steps=args.steps,teacher_forced=True,checks=checks,layer_wall_samples=timings,
         sparse_vs_dense_relative_l2=sparse_dense,scope='pretrained layer0 Attention only; no MLP/full model/logits/generation quality claim',
