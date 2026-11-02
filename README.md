@@ -7,7 +7,9 @@
 - decode head_dim=1..256 的整数；BF16/FP16；页大小与 MoBA chunk 无需整除。
 - prefill 阶段说明见 `docs/coverage_20261101.md`；decode API、边界和验收见 `docs/decode_paged_20261101.md`。
 
-2026-11-02 单 A40 完整回归：**464 项通过、2 项双卡测试按授权范围跳过**（含新增 23 项 CPU 和 136 项 GPU decode 测试）。
+2026-11-02 单 A40 最终完整回归：**485 项通过、2 项双卡测试按授权范围跳过**。
+
+decode 性能阶段已完成按请求路由、重复校验消除与 metadata 优化：对冻结 cache v1，28 配置×两轮的 `attend` / `append_and_attend` 几何平均分别改善 **1.321× / 1.661×**。dense FA 在两轮中仍快于当前 attend 的 22/28 配置；完整矩阵、基线与边界见 [性能报告](docs/decode_perf_20261102.md)。
 
 下方加速数字属于历史 MHA 基线，不代表新 GQA/decode 的性能；完整模型服务、CUDA Graph 和 cache backward 不在当前声明范围。
 

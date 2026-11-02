@@ -1,0 +1,107 @@
+{
+  "statistic": "median across rounds of (v1 round median / current round median)",
+  "primary_metric": "synchronized CPU wall latency, strict input validation enabled",
+  "dense_reference": "different token set; not an equivalent-kernel speedup claim",
+  "runs": [
+    {
+      "input": "compact_r1.jsonl",
+      "git_head": "be0f30a68d0ee225f3b21b0b2e95a99173fcb5f5",
+      "harness_version": 2,
+      "config_count": 28,
+      "all_config_ids": [
+        "P01",
+        "P02",
+        "P03",
+        "P04",
+        "P05",
+        "P06",
+        "P07",
+        "P08",
+        "P09",
+        "P10",
+        "P11",
+        "P12",
+        "P13",
+        "P14",
+        "P15",
+        "P16",
+        "P17",
+        "P18",
+        "M01",
+        "M02",
+        "M03",
+        "M04",
+        "M05",
+        "M06",
+        "F01",
+        "F02",
+        "F03",
+        "F04"
+      ],
+      "workloads": {
+        "attend": {
+          "min_speedup": 1.0251814950114448,
+          "max_speedup": 4.552601684924105,
+          "geomean_speedup": 1.3195886787893147,
+          "regression_ids": []
+        },
+        "append_and_attend": {
+          "min_speedup": 1.4662334077047015,
+          "max_speedup": 2.2810215993583305,
+          "geomean_speedup": 1.6466969474357898,
+          "regression_ids": []
+        }
+      }
+    },
+    {
+      "input": "compact_r2.jsonl",
+      "git_head": "be0f30a68d0ee225f3b21b0b2e95a99173fcb5f5",
+      "harness_version": 2,
+      "config_count": 28,
+      "all_config_ids": [
+        "P01",
+        "P02",
+        "P03",
+        "P04",
+        "P05",
+        "P06",
+        "P07",
+        "P08",
+        "P09",
+        "P10",
+        "P11",
+        "P12",
+        "P13",
+        "P14",
+        "P15",
+        "P16",
+        "P17",
+        "P18",
+        "M01",
+        "M02",
+        "M03",
+        "M04",
+        "M05",
+        "M06",
+        "F01",
+        "F02",
+        "F03",
+        "F04"
+      ],
+      "workloads": {
+        "attend": {
+          "min_speedup": 1.0173688351147523,
+          "max_speedup": 4.579996061732346,
+          "geomean_speedup": 1.32249229113482,
+          "regression_ids": []
+        },
+        "append_and_attend": {
+          "min_speedup": 1.4820034715328538,
+          "max_speedup": 2.3811747124448264,
+          "geomean_speedup": 1.6750015681450379,
+          "regression_ids": []
+        }
+      }
+    }
+  ]
+}
