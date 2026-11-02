@@ -38,6 +38,32 @@ def compare(a,b):
     torch.testing.assert_close(a.lse,b.lse,atol=5e-4,rtol=2e-5)
 
 
+def sampled_fp64(old,result,q):
+    """Independent Torch gather from the baseline cache; CPU FP64 softmax.
+
+    Sample two heads per query without copying multi-GiB full caches to CPU.
+    This does not reuse the prepared page table or its Attention kernel.
+    """
+    route=result.selected_blocks.cpu()
+    errors=[]
+    for row,(sid,pos) in enumerate(zip(result.sequence_ids,result.positions)):
+        for head in sorted({0,q.shape[1]-1}):
+            blocks=[int(x) for x in route[row,head].tolist() if x>=0]
+            tokens=sorted(t for block in blocks for t in range(block*old.chunk_size,min((block+1)*old.chunk_size,pos+1)))
+            index=torch.tensor(tokens,device='cuda',dtype=torch.int64)
+            pages=old._table[sid,index//old.k_cache.shape[1]].long()
+            kh=head//(q.shape[1]//old.num_kv_heads)
+            k=old.k_cache[pages,index%old.k_cache.shape[1],kh].cpu().double()
+            v=old.v_cache[pages,index%old.k_cache.shape[1],kh].cpu().double()
+            logits=(k*q[row,head].cpu().double()).sum(-1)*q.shape[-1]**-0.5
+            expected=torch.softmax(logits,0)@v
+            actual=result.output[row,head].cpu().double()
+            torch.testing.assert_close(actual,expected,atol=0.02,rtol=0.02)
+            torch.testing.assert_close(result.lse[row,head].cpu().double(),torch.logsumexp(logits,0),atol=5e-4,rtol=2e-5)
+            errors.append(float((actual-expected).abs().max()))
+    return dict(sampled_query_heads=len(errors),max_output_abs_error=max(errors))
+
+
 def fixture(cfg,args,strict):
     b,hk,d=cfg['batch'],cfg['kv_heads'],cfg['dim']
     lengths=cfg.get('lengths',[cfg['length']]*b)
@@ -66,7 +92,11 @@ def measure(cfg,args,strict,graph):
     old,new,p,q,k,v=fixture(cfg,args,strict)
     ids=list(range(cfg['batch']));topk=cfg['topk']
     if graph:p.capture('attend').capture('step')
-    compare(old.attend(q,sequence_ids=ids,topk=topk),p.attend(q,use_graph=graph))
+    before=[t.data_ptr() for t in (new._table,new._lengths,p.scores,p.selected,p.output)]
+    final=p.attend(q,use_graph=graph)
+    compare(old.attend(q,sequence_ids=ids,topk=topk),final)
+    oracle=sampled_fp64(old,final,q) if cfg.get('fragmented') else None
+    assert before==[t.data_ptr() for t in (new._table,new._lengths,p.scores,p.selected,p.output)]
     name='prepared_graph' if graph else 'prepared_eager'
     records=paired({'cab3_eager':lambda:old.attend(q,sequence_ids=ids,topk=topk),
                     name:lambda:p.attend(q,use_graph=graph)},args.rounds,args.samples,args.warmup)
@@ -77,6 +107,7 @@ def measure(cfg,args,strict,graph):
     result={'attend':records,'step':steps,'summaries':{'attend':stat(records),'step':stat(steps)},
             'metadata_delta_uploads':p.delta_uploads,'append_calls':1+args.warmup+args.rounds*args.samples,
             'table_persistent':True,'graph_scope':'GPU compute; capacity/page planning and input copies outside'}
+    result['sampled_fp64']=oracle
     p.close()
     return result
 
