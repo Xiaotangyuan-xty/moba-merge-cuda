@@ -1,0 +1,86 @@
+[
+  {
+    "id": "L1_65536",
+    "batch": 1,
+    "length": 65536,
+    "q_heads": 32,
+    "kv_heads": 8,
+    "dim": 128,
+    "dtype": "bf16",
+    "page": 16,
+    "chunk": 128,
+    "topk": 4,
+    "fragmented": true
+  },
+  {
+    "id": "L1_131072",
+    "batch": 1,
+    "length": 131072,
+    "q_heads": 32,
+    "kv_heads": 8,
+    "dim": 128,
+    "dtype": "bf16",
+    "page": 16,
+    "chunk": 128,
+    "topk": 4,
+    "fragmented": true
+  },
+  {
+    "id": "L4_65536",
+    "batch": 4,
+    "length": 65536,
+    "q_heads": 32,
+    "kv_heads": 8,
+    "dim": 128,
+    "dtype": "bf16",
+    "page": 16,
+    "chunk": 128,
+    "topk": 4,
+    "fragmented": true
+  },
+  {
+    "id": "L4_131072",
+    "batch": 4,
+    "length": 131072,
+    "q_heads": 32,
+    "kv_heads": 8,
+    "dim": 128,
+    "dtype": "bf16",
+    "page": 16,
+    "chunk": 128,
+    "topk": 4,
+    "fragmented": true
+  },
+  {
+    "id": "RAGGED",
+    "batch": 4,
+    "length": 32767,
+    "lengths": [
+      127,
+      4097,
+      8193,
+      32767
+    ],
+    "q_heads": 28,
+    "kv_heads": 4,
+    "dim": 128,
+    "dtype": "bf16",
+    "page": 7,
+    "chunk": 128,
+    "topk": 4,
+    "fragmented": true
+  },
+  {
+    "id": "MQA128K",
+    "batch": 1,
+    "length": 131072,
+    "q_heads": 32,
+    "kv_heads": 1,
+    "dim": 128,
+    "dtype": "bf16",
+    "page": 16,
+    "chunk": 128,
+    "topk": 4,
+    "fragmented": true
+  }
+]

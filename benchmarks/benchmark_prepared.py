@@ -131,16 +131,7 @@ def measure(cfg,args,strict,graph):
 
 
 def realistic():
-    rows=[]
-    for b in (1,4):
-        for length in (65536,131072):
-            rows.append(dict(id=f'L{b}_{length}',batch=b,length=length,q_heads=32,kv_heads=8,
-                             dim=128,dtype='bf16',page=16,chunk=128,topk=4,fragmented=True))
-    rows.append(dict(id='RAGGED',batch=4,length=32767,lengths=[127,4097,8193,32767],q_heads=28,
-                     kv_heads=4,dim=128,dtype='bf16',page=7,chunk=128,topk=4,fragmented=True))
-    rows.append(dict(id='MQA128K',batch=1,length=131072,q_heads=32,kv_heads=1,
-                     dim=128,dtype='bf16',page=16,chunk=128,topk=4,fragmented=True))
-    return rows
+    return json.loads((Path(__file__).resolve().parents[1]/"configs/prepared_realistic.json").read_text())
 
 
 def main():
