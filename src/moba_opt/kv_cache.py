@@ -84,8 +84,7 @@ class PagedKVCache:
             max_chunks = (max_seq_len + self.chunk_size - 1) // self.chunk_size
             self._means = torch.empty((batch_size, max_chunks, self.num_kv_heads, self.head_dim),
                                       dtype=dtype, device=self.device)
-            self._candidate_ids = torch.empty(0, dtype=torch.int32, device=self.device)
-            self._candidate_chunks = torch.empty_like(self._candidate_ids)
+            self._candidate_count = 0
 
     @property
     def lengths(self):
@@ -130,10 +129,9 @@ class PagedKVCache:
             raise ValueError("append sequences must be nonempty")
         return ids, counts
 
-    def _candidates(self, lengths):
-        pairs = [(sid, c) for sid, length in enumerate(lengths)
-                 for c in range(max(0, (length + self.chunk_size - 1) // self.chunk_size - 1))]
-        return (self._gpu([p[0] for p in pairs]), self._gpu([p[1] for p in pairs]))
+    def _count_candidates(self, lengths):
+        return sum(max(0, (length + self.chunk_size - 1) // self.chunk_size - 1)
+                   for length in lengths)
 
     def _gpu(self, data):
         return torch.tensor(data, dtype=torch.int32, device=self.device)
@@ -151,23 +149,26 @@ class PagedKVCache:
             self._tensor(v, "v", expected_heads=self.num_kv_heads, expected_tokens=k.shape[0])
             self._reject_storage_alias(k, v)
             ids, counts = self._append_counts(k.shape[0], sequence_ids, cu_seqlens)
-            plan = self._layout.plan_append(ids, counts)
-            # Allocate metadata before modifying GPU data. Validation/pool failures
-            # above leave the cache unchanged. Only previously invisible slots
-            # and newly closed chunk means are written below.
-            table, lengths = self._gpu(plan.tables), self._gpu(plan.lengths)
-            token_ids, positions = self._gpu(plan.token_sequences), self._gpu(plan.token_positions)
-            candidates = self._candidates(plan.lengths)
-            closed_ids = self._gpu([p[0] for p in plan.completed_chunks])
-            closed_chunks = self._gpu([p[1] for p in plan.completed_chunks])
-            kernels.append_tokens(k.contiguous(), v.contiguous(), self.k_cache, self.v_cache,
-                                  table, token_ids, positions)
-            kernels.update_closed_means(self.k_cache, table, self._means,
-                                        closed_ids, closed_chunks, self.chunk_size)
-            self._layout.commit(plan)
-            self._table, self._lengths = table, lengths
-            self._candidate_ids, self._candidate_chunks = candidates
-            return AppendResult(plan.token_sequences, plan.token_positions)
+            return self._append_validated(k, v, ids, counts)
+
+    def _append_validated(self, k, v, ids, counts):
+        """Internal: caller holds lock/device/stream and validated all inputs."""
+        plan = self._layout.plan_append(ids, counts)
+        # All metadata allocated before writing invisible new slots. Candidate
+        # IDs are now implicit per request; no global candidate list is copied.
+        table, lengths = self._gpu(plan.tables), self._gpu(plan.lengths)
+        token_ids, positions = self._gpu(plan.token_sequences), self._gpu(plan.token_positions)
+        closed_ids = self._gpu([p[0] for p in plan.completed_chunks])
+        closed_chunks = self._gpu([p[1] for p in plan.completed_chunks])
+        candidate_count = self._count_candidates(plan.lengths)
+        kernels.append_tokens(k.contiguous(), v.contiguous(), self.k_cache, self.v_cache,
+                              table, token_ids, positions)
+        kernels.update_closed_means(self.k_cache, table, self._means,
+                                    closed_ids, closed_chunks, self.chunk_size)
+        self._layout.commit(plan)
+        self._table, self._lengths = table, lengths
+        self._candidate_count = candidate_count
+        return AppendResult(plan.token_sequences, plan.token_positions)
 
     def _query_metadata(self, q, sequence_ids, positions):
         self._tensor(q, "q")
@@ -184,21 +185,21 @@ class PagedKVCache:
             raise ValueError("query grid exceeds int32 capacity")
         return ids, pos
 
-    def _route(self, q, ids, positions, topk):
+    def _route(self, q, ids, positions, topk, max_history):
         nq, hq, _ = q.shape
-        count = self._candidate_ids.numel()
         local = positions.div(self.chunk_size, rounding_mode="floor")[:, None, None].expand(nq, hq, 1)
-        remote = min(int(topk) - 1, count)
+        # Preserve v1 result width, including -1 padding when other requests
+        # have candidates but these queries have little/no legal history.
+        remote = min(int(topk) - 1, self._candidate_count)
         if not remote:
             return local.contiguous()
-        if count * hq * nq >= 2**31:
+        width = max(remote, max_history)
+        if width * hq * nq >= 2**31:
             raise ValueError("route score grid exceeds int32 capacity")
-        scores = torch.empty(count, hq, nq, dtype=torch.float32, device=self.device)
-        kernels.route_scores(q, self._means, self._candidate_ids, self._candidate_chunks,
-                             ids, positions, self.chunk_size, scores)
-        values, indices = torch.topk(scores, remote, dim=0, sorted=False)
-        chunks = self._candidate_chunks[indices.long()]
-        chunks = torch.where(values.isfinite(), chunks, -1).permute(2, 1, 0)
+        scores = torch.empty(nq, hq, width, dtype=torch.float32, device=self.device)
+        kernels.route_scores(q, self._means, ids, positions, self.chunk_size, scores)
+        values, indices = torch.topk(scores, remote, dim=-1, sorted=False)
+        chunks = torch.where(values.isfinite(), indices.to(torch.int32), -1)
         return torch.cat((local, chunks), dim=-1).contiguous()
 
     @torch.no_grad()
@@ -207,30 +208,36 @@ class PagedKVCache:
             self._check_stream()
             dense = _mode(mode, topk)
             ids, pos = self._query_metadata(q, sequence_ids, positions)
-            q = q.contiguous()
-            gpu_ids, gpu_pos = self._gpu(ids), self._gpu(pos)
-            selected = None if dense else self._route(q, gpu_ids, gpu_pos, topk)
-            out = torch.empty_like(q)
-            lse = torch.empty(q.shape[:2], device=self.device, dtype=torch.float32)
-            kernels.paged_attention(q, self.k_cache, self.v_cache, self._table, self._lengths,
-                                    gpu_ids, gpu_pos, selected if selected is not None else self._candidate_ids,
-                                    out, lse, self.chunk_size, dense)
-            return DecodeResult(out, lse, selected, ids, pos)
+            return self._attend_validated(q, ids, pos, topk, dense)
+
+    def _attend_validated(self, q, ids, pos, topk, dense):
+        q = q.contiguous()
+        gpu_ids, gpu_pos = self._gpu(ids), self._gpu(pos)
+        selected = None if dense else self._route(q, gpu_ids, gpu_pos, topk,
+                                                 max(pos) // self.chunk_size)
+        out = torch.empty_like(q)
+        lse = torch.empty(q.shape[:2], device=self.device, dtype=torch.float32)
+        kernels.paged_attention(q, self.k_cache, self.v_cache, self._table, self._lengths,
+                                gpu_ids, gpu_pos, selected if selected is not None else self._lengths,
+                                out, lse, self.chunk_size, dense)
+        return DecodeResult(out, lse, selected, ids, pos)
 
     @torch.no_grad()
     def append_and_attend(self, q, k, v, *, sequence_ids, cu_seqlens=None, topk=4, mode="moba"):
         with self._lock, torch.cuda.device(self.device):
             self._check_stream()
-            _mode(mode, topk)
+            dense = _mode(mode, topk)
             self._tensor(k, "k", expected_heads=self.num_kv_heads)
             self._tensor(v, "v", expected_heads=self.num_kv_heads, expected_tokens=k.shape[0])
             self._tensor(q, "q", expected_tokens=k.shape[0])
-            self._reject_storage_alias(q)
+            self._reject_storage_alias(q, k, v)
             if q.shape[1] % self.num_kv_heads:
                 raise ValueError("Hq must be a multiple of Hkv")
-            info = self.append(k, v, sequence_ids=sequence_ids, cu_seqlens=cu_seqlens)
-            return self.attend(q, sequence_ids=info.sequence_ids, positions=info.positions,
-                               topk=topk, mode=mode)
+            if q.shape[0] * q.shape[1] >= 2**31:
+                raise ValueError("query grid exceeds int32 capacity")
+            ids, counts = self._append_counts(k.shape[0], sequence_ids, cu_seqlens)
+            info = self._append_validated(k, v, ids, counts)
+            return self._attend_validated(q, info.sequence_ids, info.positions, topk, dense)
 
     @torch.no_grad()
     def reset(self, sequence_ids=None):
@@ -246,9 +253,9 @@ class PagedKVCache:
             replacement.version = old.version
             replacement.reset(ids)
             table, lengths = self._gpu(replacement.tables), self._gpu(replacement.lengths)
-            candidates = self._candidates(replacement.lengths)
+            candidate_count = self._count_candidates(replacement.lengths)
             self._layout, self._table, self._lengths = replacement, table, lengths
-            self._candidate_ids, self._candidate_chunks = candidates
+            self._candidate_count = candidate_count
 
     @torch.no_grad()
     def materialize(self, sequence_id):

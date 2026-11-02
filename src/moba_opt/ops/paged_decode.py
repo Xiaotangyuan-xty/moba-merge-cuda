@@ -45,24 +45,23 @@ def _closed_means_kernel(KC, TABLE, MEANS, IDS, CHUNKS,
 
 
 @triton.jit
-def _route_kernel(Q, MEANS, CAND_SID, CAND_CHUNK, QSID, QPOS, SCORES,
+def _route_kernel(Q, MEANS, QSID, QPOS, SCORES,
                   NQ: tl.constexpr, HQ: tl.constexpr, HK: tl.constexpr,
                   D: tl.constexpr, DP: tl.constexpr, C: tl.constexpr,
-                  MAX_CHUNKS: tl.constexpr):
-    candidate = tl.program_id(0) // (HQ * NQ)
-    head = (tl.program_id(0) // NQ) % HQ
-    query = tl.program_id(0) % NQ
-    sid, chunk = tl.load(CAND_SID + candidate), tl.load(CAND_CHUNK + candidate)
-    qsid, pos = tl.load(QSID + query), tl.load(QPOS + query)
-    legal = (sid == qsid) & ((chunk + 1) * C <= pos)
+                  MAX_CHUNKS: tl.constexpr, NC: tl.constexpr, BC: tl.constexpr):
+    head = tl.program_id(1) % HQ
+    query = tl.program_id(1) // HQ
+    sid, pos = tl.load(QSID + query), tl.load(QPOS + query)
+    chunk = tl.program_id(0) * BC + tl.arange(0, BC)
+    legal = (chunk < NC) & ((chunk + 1) * C <= pos)
     d = tl.arange(0, DP)
     kvhead = head // (HQ // HK)
-    q = tl.load(Q + (query.to(tl.int64) * HQ + head) * D + d, mask=legal & (d < D), other=0).to(tl.float32)
-    mean = tl.load(MEANS + ((sid.to(tl.int64) * MAX_CHUNKS + chunk) * HK + kvhead) * D + d,
-                   mask=legal & (d < D), other=0).to(tl.float32)
-    score = tl.sum(q * mean, axis=0)
-    tl.store(SCORES + (candidate.to(tl.int64) * HQ + head) * NQ + query,
-             tl.where(legal, score, -float("inf")))
+    q = tl.load(Q + (query.to(tl.int64) * HQ + head) * D + d, mask=d < D, other=0).to(tl.float32)
+    address = ((sid.to(tl.int64) * MAX_CHUNKS + chunk[:, None]) * HK + kvhead) * D + d[None, :]
+    mean = tl.load(MEANS + address, mask=legal[:, None] & (d[None, :] < D), other=0).to(tl.float32)
+    score = tl.sum(q[None, :] * mean, axis=1)
+    tl.store(SCORES + (query.to(tl.int64) * HQ + head) * NC + chunk,
+             tl.where(legal, score, -float("inf")), mask=chunk < NC)
 
 
 @triton.jit
@@ -128,11 +127,12 @@ def update_closed_means(kc, table, means, ids, chunks, chunk_size):
             num_warps=8 if chunk_size >= 512 else 4)
 
 
-def route_scores(q, means, candidate_ids, candidate_chunks, query_ids, positions, chunk_size, scores):
+def route_scores(q, means, query_ids, positions, chunk_size, scores):
     nq, hq, d = q.shape
-    _route_kernel[(candidate_ids.numel() * hq * nq,)](
-        q, means, candidate_ids, candidate_chunks, query_ids, positions, scores,
-        nq, hq, means.shape[2], d, triton.next_power_of_2(d), chunk_size, means.shape[1])
+    count = scores.shape[-1]
+    _route_kernel[(triton.cdiv(count,8),nq*hq)](
+        q, means, query_ids, positions, scores,
+        nq, hq, means.shape[2], d, triton.next_power_of_2(d), chunk_size, means.shape[1],count,8)
 
 
 def paged_attention(q, kc, vc, table, lengths, ids, positions, selected, out, lse,

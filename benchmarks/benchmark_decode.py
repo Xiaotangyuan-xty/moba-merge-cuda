@@ -154,9 +154,15 @@ def profile(cache, q, ids, path):
                     cache.attend(q, sequence_ids=ids, topk=4)
             torch.cuda.synchronize()
     p.export_chrome_trace(str(path))
-    return [{"name": x.key, "count": x.count, "cpu_total_us": x.cpu_time_total,
-             "device_total_us": x.device_time_total} for x in p.key_averages()
-            if x.key.startswith("decode/")]
+    labels = [{"name":x.key,"count":x.count,"cpu_total_us":x.cpu_time_total}
+              for x in p.key_averages() if x.key.startswith("decode/") and x.cpu_time_total>0]
+    kernels = {}
+    for event in json.loads(path.read_text())["traceEvents"]:
+        if event.get("cat")!="kernel":continue
+        row=kernels.setdefault(event["name"],{"count":0,"total_us":0})
+        row["count"]+=1;row["total_us"]+=event.get("dur",0)
+    return {"labels_cpu":labels,"kernels":kernels,
+            "note":"profiler is diagnostic; primary latency comes from uninstrumented paired runs"}
 
 
 def measure(cfg, args, out_dir):
