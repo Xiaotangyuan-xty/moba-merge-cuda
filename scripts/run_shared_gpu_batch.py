@@ -83,7 +83,7 @@ def main():
     started_utc=datetime.now(timezone.utc).isoformat()
     source_hashes={str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest()
                    for folder in ("src","tests","reference","scripts","benchmarks","configs")
-                   for p in (ROOT/folder).rglob("*") if p.is_file() and p.suffix in (".py",".cu",".cpp",".sh",".yaml")}
+                   for p in (ROOT/folder).rglob("*") if p.is_file() and p.suffix in (".py",".cu",".cpp",".sh",".yaml",".json")}
     reason="completed";peak=0;proc=None
     with log_path.open("w") as logfile:
         try:
