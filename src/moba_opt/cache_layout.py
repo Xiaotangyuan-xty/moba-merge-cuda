@@ -97,3 +97,52 @@ class PageAllocator:
             lengths[sid] = 0
         self.tables, self.lengths, self.free_pages = tuple(map(tuple, tables)), tuple(lengths), tuple(free)
         self.version += 1
+
+
+@dataclass(frozen=True)
+class StepPlan:
+    version: int
+    positions: tuple
+    updates: tuple  # (sequence_id, logical_page, physical_page)
+
+
+class IncrementalLayout:
+    """Exclusive fixed-active-set lease; O(active batch) per decode step.
+
+    Copy the page table once, mutate only newly allocated entries, publish an
+    immutable PageAllocator snapshot on close. No full-table work per token.
+    """
+    def __init__(self, layout, sequence_ids):
+        self.ids = layout.validate_ids(sequence_ids, unique=True)
+        self.tables = [list(row) for row in layout.tables]
+        self.lengths = list(layout.lengths)
+        self.free = list(layout.free_pages)
+        self.version = layout.version
+        self.page_size, self.max_seq_len = layout.page_size, layout.max_seq_len
+
+    def plan(self):
+        positions = tuple(self.lengths[s] for s in self.ids)
+        if any(p >= self.max_seq_len for p in positions):
+            raise ValueError("append exceeds max_seq_len")
+        needs = [(s, p // self.page_size) for s,p in zip(self.ids,positions)
+                 if p % self.page_size == 0]
+        if len(needs) > len(self.free):
+            raise ValueError("KV page pool exhausted; cache was not modified")
+        updates = tuple((s,logical,self.free[-1-i]) for i,(s,logical) in enumerate(needs))
+        return StepPlan(self.version, positions, updates)
+
+    def commit(self, plan):
+        if plan.version != self.version:
+            raise RuntimeError("stale decode step plan")
+        for sid,logical,physical in plan.updates:
+            assert self.free.pop() == physical
+            self.tables[sid][logical] = physical
+        for sid in self.ids:
+            self.lengths[sid] += 1
+        self.version += 1
+
+    def publish(self, layout):
+        layout.tables = tuple(map(tuple,self.tables))
+        layout.lengths = tuple(self.lengths)
+        layout.free_pages = tuple(self.free)
+        layout.version = self.version

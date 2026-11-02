@@ -72,6 +72,8 @@ class PagedKVCache:
         self._layout = PageAllocator(batch_size, max_seq_len, page_size, num_pages, self.chunk_size)
         self.dtype = dtype
         self._lock = threading.RLock()
+        self._prepared_owner = None
+        self._invalid = False
         with torch.cuda.device(requested):
             self.device = torch.device("cuda", torch.cuda.current_device())
             self._stream = torch.cuda.current_stream(self.device).cuda_stream
@@ -88,14 +90,18 @@ class PagedKVCache:
 
     @property
     def lengths(self):
+        if self._prepared_owner is not None:return self._prepared_owner.lengths
         return self._layout.lengths
 
     @property
     def page_table(self):
         """Immutable CPU snapshot; no caller can edit the internal page table."""
-        return self._layout.tables
+        return self._layout.tables if self._prepared_owner is None else self._prepared_owner.page_table
 
-    def _check_stream(self):
+    def _check_stream(self, *, allow_prepared=False):
+        if self._invalid:raise RuntimeError("CUDA execution failed; discard this cache")
+        if self._prepared_owner is not None and not allow_prepared:
+            raise ValueError("prepared decode owns cache; close it before ordinary cache operations")
         if torch.cuda.is_current_stream_capturing():
             raise ValueError("CUDA Graph capture is unsupported for this cache API")
         if torch.cuda.current_stream(self.device).cuda_stream != self._stream:
@@ -118,6 +124,10 @@ class PagedKVCache:
             raise ValueError(f"{name} token count differs")
         if not bool(torch.isfinite(tensor).all()):
             raise ValueError(f"{name} contains NaN/Inf")
+
+    def prepare_decode(self,sequence_ids,num_q_heads,*,topk=4,mode="moba",check_finite=True):
+        from .prepared_decode import PreparedDecode
+        return PreparedDecode(self,sequence_ids,num_q_heads,topk=topk,mode=mode,check_finite=check_finite)
 
     def _append_counts(self, token_count, sequence_ids, cu_seqlens):
         ids = self._layout.validate_ids(_ints(sequence_ids, "sequence_ids"), unique=True)
@@ -272,7 +282,7 @@ class PagedKVCache:
     def materialize(self, sequence_id):
         """Diagnostic/reference readback only; not called by attend()."""
         with self._lock, torch.cuda.device(self.device):
-            self._check_stream()
+            self._check_stream(allow_prepared=True)
             sid = self._layout.validate_ids([sequence_id])[0]
             length = self.lengths[sid]
             pos = torch.arange(length, device=self.device)
