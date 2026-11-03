@@ -9,6 +9,7 @@ import hashlib
 import json
 import math
 import os
+import re
 from pathlib import Path
 import statistics
 import subprocess
@@ -21,7 +22,8 @@ from flash_attn import flash_attn_func
 from transformers import AutoModelForCausalLM,AutoTokenizer
 import moba_opt.grouped_attention as grouped
 from examples.full_qwen2 import FullQwen2Session
-from scripts.evaluate_full_model import head_nll,dense_metrics,sync_time
+from scripts.evaluate_full_model import head_nll,dense_metrics,sync_time,Native,assert_dense
+from examples.retrieval_cases import retrieval_cases
 
 STABLE=dict(deterministic_merge=True,stable_routes=True,route_precision='fp32')
 METHODS=('dense','stable_k4','stable_k8','calibrated_k4','dense_prefill_k4')
@@ -43,6 +45,23 @@ def session(model,name,capacity,policy=None,backend='model_graph'):
 
 
 def cleanup():gc.collect();torch.cuda.empty_cache()
+
+
+def integration(model,tokens):
+    ids=torch.tensor([tokens[:128]],device='cuda');targets=tokens[128:140]
+    native=Native(model)
+    refs=[native.prefill(ids).clone()]
+    for t in targets:refs.append(native.step(t).clone())
+    native.close();rows=[]
+    for name in ('dense','stable_k4'):
+        with session(model,name,160) as s:
+            h=s.prefill_hidden(ids);checks=[dense_metrics(refs[0],model.lm_head(h[:,-1:]))];del h
+            s.prepare()
+            for i,t in enumerate(targets):checks.append(dense_metrics(refs[i+1],s.step(t)))
+            for c in checks:assert_dense(c)
+            assert all(c.lengths==(140,) for c in s.caches)
+        rows.append(dict(method=name,all_selected=True,checks=checks));del s;cleanup()
+    return dict(scope='native HF FA2 versus complete dense/all-selected Graph;128prefix+12steps;fixed prior tolerances',rows=rows)
 
 
 def score_policy(model,tokens,name,policy,blocks=4,length=2048,continuation=128):
@@ -207,14 +226,44 @@ def long_context(model,tokens,policy,lengths):
     return dict(protocol='complete model Graph paired directly with auto-split dense Graph;3warm+3x8 AB/BA;tail512 diagnostic,24 continuation targets',rows=rows)
 
 
+def retrieve(model,tokenizer,policy,lengths):
+    rows=[]
+    for case in retrieval_cases(tokenizer,lengths=lengths):
+        answer=tokenizer.encode(' '+case['answer'],add_special_tokens=False)
+        ids=torch.tensor([case['tokens']],device='cuda')
+        for name in ('dense','stable_k4','calibrated_k4'):
+            row={k:v for k,v in case.items() if k!='tokens'};row['method']=name
+            try:
+                loss=0.;generated=[]
+                for kind in ('score','greedy'):
+                    with session(model,name,case['length']+40,policy) as s:
+                        h=s.prefill_hidden(ids);logits=model.lm_head(h[:,-1:]);del h
+                        s.prepare()
+                        for i in range(len(answer) if kind=='score' else 16):
+                            token=answer[i] if kind=='score' else int(logits[:,-1].argmax(-1))
+                            if kind=='score':loss+=float(F.cross_entropy(logits[:,-1].float(),torch.tensor([token],device='cuda')))
+                            else:
+                                if token==tokenizer.eos_token_id:break
+                                generated.append(token)
+                            if i+1<(len(answer) if kind=='score' else 16):logits=s.step(token)
+                    del s,logits;cleanup()
+                text=tokenizer.decode(generated,skip_special_tokens=True)
+                found=re.search(r'(?<!\d)\d{4}(?!\d)',text)
+                row.update(status='ok',answer_tokens=len(answer),answer_nll=loss,generated_text=text,
+                           generated_ids=generated,exact_match=bool(found and found.group()==case['answer']))
+            except torch.OutOfMemoryError:row['status']='allocator_oom_within_approved_cap'
+            rows.append(row);cleanup();print(json.dumps(row),flush=True)
+    return dict(protocol='fixed synthetic passkey,lengths x25/75percent;all cases kept;16 greedy tokens;not general QA',rows=rows)
+
+
 def main():
     p=argparse.ArgumentParser();p.add_argument('--model',required=True);p.add_argument('--corpus',required=True)
     p.add_argument('--train');p.add_argument('--calibration');p.add_argument('--out',required=True)
-    p.add_argument('--stage',choices=['stability','calibrate','evaluate','long'],required=True)
+    p.add_argument('--stage',choices=['integration','stability','calibrate','evaluate','long','retrieve'],required=True)
     p.add_argument('--lengths',default='8192,16384,32704')
     args=p.parse_args();out=Path(args.out)
     if out.exists():raise SystemExit('preserve existing evidence')
-    if args.stage in ('evaluate','long') and not args.calibration:raise SystemExit('frozen calibration required')
+    if args.stage in ('evaluate','long','retrieve') and not args.calibration:raise SystemExit('frozen calibration required')
     torch.set_num_threads(2);torch.manual_seed(20261103)
     torch.backends.cuda.matmul.allow_tf32=False
     torch.cuda.set_per_process_memory_fraction(7*1024**3/torch.cuda.get_device_properties(0).total_memory)
@@ -232,15 +281,17 @@ def main():
     policy=None
     if args.calibration:
         cal=json.loads(Path(args.calibration).read_text())
-        if cal['model_config_sha256']!=record['model_config_sha256'] or cal['stage']!='calibrate' or cal['status']!='ok':raise ValueError('mismatched calibration')
-        if cal['corpus_sha256']==record['corpus_sha256']:raise ValueError('calibration/test data overlap')
+        if cal['model_config_sha256']!=record['model_config_sha256'] or cal['stage']!='calibrate' or cal['status']!='ok' or cal['dirty']:raise ValueError('mismatched calibration')
+        if record['corpus_sha256'] in (cal['corpus_sha256'],cal.get('train_sha256')):raise ValueError('calibration/test data overlap')
         policy=cal['result']['policy'];record['calibration_sha256']=digest(args.calibration)
     with torch.inference_mode():
-        if args.stage=='stability':result=stability(model,tokens)
+        if args.stage=='integration':result=integration(model,tokens)
+        elif args.stage=='stability':result=stability(model,tokens)
         elif args.stage=='calibrate':
             if not args.train or digest(args.train)==record['corpus_sha256']:raise ValueError('separate train and valid data required')
             record['train_sha256']=digest(args.train);result=calibrate(model,tokenize(args.train),tokens)
         elif args.stage=='evaluate':result=evaluate(model,tokens,policy)
+        elif args.stage=='retrieve':result=retrieve(model,tokenizer,policy,list(map(int,args.lengths.split(','))))
         else:result=long_context(model,tokens,policy,list(map(int,args.lengths.split(','))))
     record.update(status='ok',result=result)
     out.parent.mkdir(exist_ok=True,parents=True);out.write_text(json.dumps(record,indent=2)+'\n')

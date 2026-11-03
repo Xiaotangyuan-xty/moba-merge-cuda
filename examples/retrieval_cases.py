@@ -4,11 +4,11 @@ import random
 import struct
 
 
-def retrieval_cases(tokenizer,seed=20261102):
+def retrieval_cases(tokenizer,seed=20261102,lengths=(512,2048,4096)):
     rng=random.Random(seed)
     pad=tokenizer.encode('Ordinary memory notes discuss processors, buffers, queues, files and arithmetic.\n',add_special_tokens=False)
     cases=[]
-    for length in (512,2048,4096):
+    for length in lengths:
         for fraction in (0.25,0.75):
             key='K'+str(rng.randrange(10000,99999));answer=str(rng.randrange(1000,9999))
             if answer=='1290':answer='1291'
