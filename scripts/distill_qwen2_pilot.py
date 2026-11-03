@@ -219,6 +219,21 @@ def evaluate(model,data,recipe,training,folder):
                 aggregates=aggregate(rows,recipe),mask_changed=False,teacher_reference='original unchanged base checkpoint')
 
 
+def diagnose_last(model,data,recipe,training,folder,evaluation):
+    d=Qwen2Distillation(model,recipe['dense_layers'],recipe['lora']['rank'],recipe['lora']['alpha'])
+    load_adapter(d,folder,training['last_adapter']);merged=d.merged_model()
+    gate=merge_check(d,merged,data['valid'],recipe)
+    rows=copy.deepcopy([r for r in evaluation['rows'] if r['method'] in ('dense','untrained')])
+    rows+=quality(d,data['test'],recipe,'test','last_unmerged',True)
+    repeated=plain_quality(merged,data['test'],recipe,'test','last_merged');rows+=repeated
+    previous={(r['length'],r['end']):r for r in evaluation['rows'] if r['method']=='last_merged'}
+    repeat_same=all(all(r[k]==previous[r['length'],r['end']][k] for k in ('input_sha256','tail_nll_sum','continuation_nll_sum')) for r in repeated)
+    deltas(rows,[r for r in rows if r['method']=='dense'],recipe)
+    return dict(scope='posthoc last-checkpoint unmerged/merged diagnosis;not used to change the predeclared selected checkpoint',
+                selected_step_unchanged=training['selected_step'],last_step=training['last_adapter']['step'],
+                last_merge_validation=gate,rows=rows,aggregates=aggregate(rows,recipe),last_merged_repeat_equal=repeat_same)
+
+
 def latency_row(base,candidate,tokens,w,recipe,method,sparse,eligible):
     conf=recipe['latency'];length=w['length'];n=conf['warmup']+conf['rounds']*conf['samples']
     kwargs=dict(mode='moba',**STABLE)
@@ -263,7 +278,7 @@ def latency(model,tokens,recipe,training,folder,evaluation):
 
 def main():
     p=argparse.ArgumentParser();p.add_argument('--model',required=True);p.add_argument('--data-dir',required=True)
-    p.add_argument('--recipe',default='configs/distill_pilot_20261103.json');p.add_argument('--stage',choices=['preflight','train','evaluate','latency'],required=True)
+    p.add_argument('--recipe',default='configs/distill_pilot_20261103.json');p.add_argument('--stage',choices=['preflight','train','evaluate','latency','diagnostic'],required=True)
     p.add_argument('--artifacts',required=True);p.add_argument('--training-result');p.add_argument('--evaluation-result');p.add_argument('--out',required=True)
     args=p.parse_args();out=Path(args.out)
     if out.exists():raise SystemExit('preserve existing evidence')
@@ -276,18 +291,18 @@ def main():
     if len(recipe['dense_layers'])*2!=recipe['num_layers']:raise ValueError('fixed50% layer policy required')
     folder=Path(args.artifacts);folder.mkdir(exist_ok=True,parents=True)
     train_record=None;evaluation=None
-    if args.stage in ('evaluate','latency'):
+    if args.stage in ('evaluate','latency','diagnostic'):
         train_record=json.loads(Path(args.training_result).read_text())
         if train_record['stage']!='train' or train_record['status']!='ok' or train_record['dirty'] or train_record['recipe_sha256']!=recipe_sha:raise ValueError('training provenance mismatch')
         if selected_step(train_record['result']['checkpoints'],recipe)!=train_record['result']['selected_step']:raise ValueError('checkpoint selection mismatch')
-    if args.stage=='latency':
+    if args.stage in ('latency','diagnostic'):
         ev=json.loads(Path(args.evaluation_result).read_text())
         if ev['status']!='ok' or ev['stage']!='evaluate' or ev['training_result_sha256']!=digest(args.training_result):raise ValueError('evaluation provenance mismatch')
         evaluation=ev['result']
     torch.set_num_threads(2);torch.manual_seed(recipe['seed']);torch.backends.cuda.matmul.allow_tf32=False
     torch.cuda.set_per_process_memory_fraction(recipe['resource']['allocator_gib']*1024**3/torch.cuda.get_device_properties(0).total_memory)
     tok=AutoTokenizer.from_pretrained(args.model,local_files_only=True,trust_remote_code=False)
-    splits={'preflight':['train'],'train':['train','valid'],'evaluate':['valid','test'],'latency':['test']}[args.stage]
+    splits={'preflight':['train'],'train':['train','valid'],'evaluate':['valid','test'],'latency':['test'],'diagnostic':['valid','test']}[args.stage]
     data={};hashes={}
     for split in splits:
         path=Path(args.data_dir)/f'wikitext2_{split}.txt';sha=digest(path)
@@ -302,6 +317,7 @@ def main():
     if args.stage=='preflight':result=preflight(model,data['train'],recipe)
     elif args.stage=='train':result=train(model,data,recipe,folder,recipe_sha,out)
     elif args.stage=='evaluate':result=evaluate(model,data,recipe,train_record['result'],folder)
+    elif args.stage=='diagnostic':result=diagnose_last(model,data,recipe,train_record['result'],folder,evaluation)
     else:result=latency(model,data['test'],recipe,train_record['result'],folder,evaluation)
     record.update(status='ok',result=result);write_json(out,record)
     print(json.dumps(dict(stage=args.stage,status='ok')),flush=True)
