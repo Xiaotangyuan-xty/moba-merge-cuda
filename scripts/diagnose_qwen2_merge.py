@@ -55,6 +55,8 @@ def diagnose(d,data,recipe,pilot,training,folder):
 
 
 def expanded(d,data,recipe,pilot,training,folder):
+    # Reuse the pilot's immutable model/layer contract with the new windows.
+    recipe=dict(pilot,**recipe)
     rr=quality(d,data,recipe,'valid','dense',False,True)
     dense=rr.copy()
     for step in recipe['expanded_checkpoints']:
