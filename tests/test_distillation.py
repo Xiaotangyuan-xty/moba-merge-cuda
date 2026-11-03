@@ -97,3 +97,23 @@ def test_teacher_immutable_and_merge_linear_semantics():
     assert torch.equal(before,d.teacher_logits(ids,p)) and d.base_digest()==digest
     merged=d.merged_model();assert not any(x.requires_grad for x in merged.parameters())
     assert all(not name.endswith(('lora_a','lora_b')) for name,_ in merged.named_parameters())
+
+
+def test_checkpoint_matches_noncheckpoint_adapter_gradients():
+    import torch
+    if not torch.cuda.is_available():pytest.skip('CUDA required')
+    from examples.qwen2_distillation import Qwen2Distillation,distillation_loss
+    d=Qwen2Distillation(small_model(),(0,),rank=2,alpha=4,chunk=4,topk=2)
+    with torch.no_grad():
+        for name,p in d.model.named_parameters():
+            if name.endswith('lora_b'):p.normal_(std=0.001)
+    ids=torch.arange(1,34,device='cuda')[None];positions=torch.tensor([5,16,30],device='cuda')
+    teacher=d.teacher_logits(ids,positions);results=[]
+    for enabled in (False,True):
+        d.zero_grad(set_to_none=True)
+        logits=d.student_logits(ids,positions,enabled)
+        loss,_=distillation_loss(logits,teacher,ids[:,positions+1]);loss.backward()
+        results.append((logits.detach().clone(),torch.cat([p.grad.flatten().clone() for p in d.adapter_parameters()])))
+    assert torch.equal(results[0][0],results[1][0])
+    a,b=results[0][1],results[1][1]
+    assert float(torch.linalg.vector_norm(a-b)/torch.linalg.vector_norm(a).clamp_min(1e-12))<0.03
