@@ -41,8 +41,7 @@ def session(model,name,capacity,policy=None,backend='model_graph'):
         opts['dense_layers']=policy['dense_layers']
     elif name=='dense_prefill_k4':opts['prefill_mode']='dense'
     elif name not in ('dense','stable_k4','stable_k8'):raise ValueError(name)
-    return FullQwen2Session(model,capacity,mode=mode,topk=topk,backend=backend,
-                           prefill_mlp_chunk=1024 if capacity>=8192 else None,**opts)
+    return FullQwen2Session(model,capacity,mode=mode,topk=topk,backend=backend,**opts)
 
 
 def cleanup():gc.collect();torch.cuda.empty_cache()
@@ -63,21 +62,6 @@ def integration(model,tokens):
             assert all(c.lengths==(140,) for c in s.caches)
         rows.append(dict(method=name,all_selected=True,checks=checks));del s;cleanup()
     return dict(scope='native HF FA2 versus complete dense/all-selected Graph;128prefix+12steps;fixed prior tolerances',rows=rows)
-
-
-def chunk_equivalence(model,tokens):
-    rows=[];ids=torch.tensor([tokens[:8192]],device='cuda')
-    for mode in ('dense','moba'):
-        first=None
-        for chunk in (None,1024):
-            with FullQwen2Session(model,8193,mode=mode,topk=4,prefill_mlp_chunk=chunk,**STABLE) as s:
-                h=s.prefill_hidden(ids);logits=model.lm_head(h[:,-16:]).clone();del h
-                if first is None:first=logits.clone()
-                metrics=dense_metrics(first,logits);assert_dense(metrics)
-                rows.append(dict(mode=mode,mlp_chunk=chunk,**metrics))
-            del s,logits;cleanup()
-        del first;cleanup()
-    return dict(protocol='8192-token prefill;compare final16logits before/after tokenwise MLP chunking;prior fixed gates',rows=rows)
 
 
 def score_policy(model,tokens,name,policy,blocks=4,length=2048,continuation=128):
@@ -243,8 +227,7 @@ def long_context(model,tokens,policy,lengths):
 
 
 def retrieve_one(model,tokenizer,policy,case,name):
-    # An OOM must unwind this frame, releasing its session and all activations
-    # before the caller continues to the next case under the same memory cap.
+    """Unwind all GPU references on failure before the caller tries a new case."""
     answer=tokenizer.encode(' '+case['answer'],add_special_tokens=False)
     ids=torch.tensor([case['tokens']],device='cuda');loss=0.;generated=[]
     for kind in ('score','greedy'):
@@ -279,7 +262,7 @@ def retrieve(model,tokenizer,policy,lengths):
 def main():
     p=argparse.ArgumentParser();p.add_argument('--model',required=True);p.add_argument('--corpus',required=True)
     p.add_argument('--train');p.add_argument('--calibration');p.add_argument('--out',required=True)
-    p.add_argument('--stage',choices=['integration','chunk','stability','calibrate','evaluate','long','retrieve'],required=True)
+    p.add_argument('--stage',choices=['integration','stability','calibrate','evaluate','long','retrieve'],required=True)
     p.add_argument('--lengths',default='8192,16384,32704')
     args=p.parse_args();out=Path(args.out)
     if out.exists():raise SystemExit('preserve existing evidence')
@@ -295,8 +278,7 @@ def main():
     record=dict(stage=args.stage,model_config=model.config.to_dict(),model_config_sha256=digest(Path(args.model)/'config.json'),
         corpus_sha256=digest(args.corpus),git_head=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),
         dirty=bool(subprocess.check_output(['git','status','--porcelain'],text=True).strip()),dtype='bf16',batch=1,
-        torch=torch.__version__,gpu=torch.cuda.get_device_name(),tf32=False,allocator_gib=7,
-        prefill_mlp_chunk=1024 if args.stage in ('long','retrieve') else None)
+        torch=torch.__version__,gpu=torch.cuda.get_device_name(),tf32=False,allocator_gib=7)
     # Model configs may contain the private local checkpoint path.
     record['model_config'].pop('_name_or_path',None)
     policy=None
@@ -307,7 +289,6 @@ def main():
         policy=cal['result']['policy'];record['calibration_sha256']=digest(args.calibration)
     with torch.inference_mode():
         if args.stage=='integration':result=integration(model,tokens)
-        elif args.stage=='chunk':result=chunk_equivalence(model,tokens)
         elif args.stage=='stability':result=stability(model,tokens)
         elif args.stage=='calibrate':
             if not args.train or digest(args.train)==record['corpus_sha256']:raise ValueError('separate train and valid data required')

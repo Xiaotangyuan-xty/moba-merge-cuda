@@ -19,7 +19,7 @@ class FullQwen2Session:
     def __init__(self,model,capacity,*,mode='dense',chunk=128,topk=4,
                  backend='eager',fused_qkv=False,page=16,dense_backend='fa2',dense_num_splits=0,
                  deterministic_merge=False,stable_routes=False,route_precision='upstream',
-                 dense_layers=(),prefill_mode='match',prefill_mlp_chunk=None):
+                 dense_layers=(),prefill_mode='match'):
         if mode not in ('dense','moba'):raise ValueError('mode')
         if backend not in ('eager','attention_graph','model_graph'):raise ValueError('backend')
         if model.config.model_type!='qwen2':raise ValueError('Qwen2 architecture required')
@@ -46,7 +46,6 @@ class FullQwen2Session:
         if not isinstance(deterministic_merge,bool) or not isinstance(stable_routes,bool):raise ValueError('stability flags must be bool')
         self.layer_dense=tuple(self.effective_dense or i in dense_layers for i in range(nlayer))
         self.prefill_mode=prefill_mode
-        self.prefill_mlp_chunk=None if prefill_mlp_chunk is None else positive_int(prefill_mlp_chunk,'prefill_mlp_chunk')
         self.route_config=dict(chunk_size=chunk,topk=topk,deterministic_merge=deterministic_merge,
                                stable_routes=stable_routes,route_precision=route_precision)
         if backend=='attention_graph' and any(self.layer_dense) and dense_backend=='fa2':
@@ -111,16 +110,7 @@ class FullQwen2Session:
             if self.layer_dense[i] or self.prefill_mode=='dense':out=flash_attn_func(q[None],k[None],v[None],causal=True)[0]
             else:out=opt_gqa_cuda(q,k,v,cu,t,self.route_config)
             h=residual+layer.self_attn.o_proj(out.reshape(1,t,-1))
-            if self.prefill_mlp_chunk is None:
-                h=h+layer.mlp(layer.post_attention_layernorm(h))
-            else:
-                # Norm and MLP are token-independent. Bound temporary FFN
-                # activations without changing any Attention/cache positions.
-                result=torch.empty_like(h)
-                for start in range(0,t,self.prefill_mlp_chunk):
-                    piece=h[:,start:start+self.prefill_mlp_chunk]
-                    result[:,start:start+self.prefill_mlp_chunk].copy_(piece+layer.mlp(layer.post_attention_layernorm(piece)))
-                h=result
+            h=h+layer.mlp(layer.post_attention_layernorm(h))
         return self.model.model.norm(h)
 
     @torch.no_grad()

@@ -88,20 +88,3 @@ def test_stable_hybrid_full_graph_and_independent_prefill(dense_layers):
             for i,(p,q) in enumerate(zip(a.plans,b.plans)):
                 assert p.lengths==q.lengths
                 if not a.layer_dense[i]:assert torch.equal(p.selected,q.selected)
-
-
-@pytest.mark.parametrize('mode',['dense','moba'])
-def test_chunked_prefill_mlp_matches_and_bounds_token_batch(mode):
-    m=model();ids=torch.arange(1,18,device='cuda')[None]
-    kwargs=dict(mode=mode,chunk=4,topk=2,**dict(deterministic_merge=True,stable_routes=True,route_precision='fp32'))
-    with torch.inference_mode(),FullQwen2Session(m,24,**kwargs) as full, \
-            FullQwen2Session(m,24,prefill_mlp_chunk=4,**kwargs) as chunked:
-        a=full.prefill_hidden(ids);sizes=[]
-        handles=[layer.mlp.register_forward_pre_hook(lambda mod,args:sizes.append(args[0].shape[1])) for layer in m.model.layers]
-        try:b=chunked.prefill_hidden(ids)
-        finally:
-            for handle in handles:handle.remove()
-        assert sizes and max(sizes)<=4
-        torch.testing.assert_close(a,b,atol=0.003,rtol=0.03)
-        for x,y in zip(full.caches,chunked.caches):
-            assert x.lengths==y.lengths==(17,)
