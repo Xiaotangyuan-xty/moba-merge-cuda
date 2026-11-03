@@ -1,0 +1,90 @@
+{
+  "stage": "profile",
+  "model": "Qwen/Qwen2.5-0.5B",
+  "dtype": "bf16",
+  "batch": 1,
+  "corpus_sha256": "d790b833ef8cf03a90db7bf1271b7520b83c45ce07ba3c1a9699df81e239eca0",
+  "model_revision": "060db6499f32faf8b98477b0a26969ef7d8b9987",
+  "model_weight_sha256": "88c142557820ccad55bb59756bfcfcf891de9cc6202816bd346445188a0ed342",
+  "model_config_sha256": "479dcf0c5286339e41ad3992cd08ae88a467c4187587936248e2b7c96283484b",
+  "finite_contract": "finite internal QKV assumed by both HF and custom model integration",
+  "git_head": "8a488700e7b8f4e04a1533eea73c168976db1680",
+  "dirty": false,
+  "torch": "2.4.0+cu121",
+  "transformers": "4.49.0",
+  "flash_attn": "2.6.3",
+  "gpu": "NVIDIA A40",
+  "result": {
+    "scope": "diagnostic profiler; does not supply formal latency",
+    "rows": [
+      {
+        "method": "moba_k4_eager",
+        "steps": 3,
+        "kernel_count": 3375,
+        "kernel_total_us": 14974.49799999996,
+        "host_launch_count": 2943,
+        "labels": [
+          {
+            "name": "model/embedding_rope",
+            "count": 3,
+            "cpu_us": 1955.1229999999941
+          },
+          {
+            "name": "model/norm_qkv_rope",
+            "count": 72,
+            "cpu_us": 56745.18299999998
+          },
+          {
+            "name": "model/cache_attention",
+            "count": 72,
+            "cpu_us": 22972.030999999923
+          },
+          {
+            "name": "model/output_projection",
+            "count": 72,
+            "cpu_us": 9642.615999999965
+          },
+          {
+            "name": "model/mlp",
+            "count": 72,
+            "cpu_us": 34442.999999999956
+          },
+          {
+            "name": "model/norm_lm_head",
+            "count": 3,
+            "cpu_us": 904.4299999999785
+          }
+        ],
+        "trace": "final_profile_20261103_moba_k4_eager_trace.json"
+      },
+      {
+        "method": "moba_k4_attngraph",
+        "steps": 3,
+        "kernel_count": 3519,
+        "kernel_total_us": 15044.325000000015,
+        "host_launch_count": 3087,
+        "labels": [],
+        "trace": "final_profile_20261103_moba_k4_attngraph_trace.json"
+      },
+      {
+        "method": "moba_k4_modelgraph",
+        "steps": 3,
+        "kernel_count": 3381,
+        "kernel_total_us": 14031.528999999999,
+        "host_launch_count": 12,
+        "labels": [],
+        "trace": "final_profile_20261103_moba_k4_modelgraph_trace.json"
+      },
+      {
+        "method": "moba_k4_modelgraph_packed",
+        "steps": 3,
+        "kernel_count": 3093,
+        "kernel_total_us": 13398.057000000028,
+        "host_launch_count": 12,
+        "labels": [],
+        "trace": "final_profile_20261103_moba_k4_modelgraph_packed_trace.json"
+      }
+    ]
+  },
+  "status": "ok"
+}

@@ -8,13 +8,15 @@
 - `prepare_decode`：固定活动请求、每步一个 token 的预分配执行接口，增量页表与 GPU 长度推进；支持显式 GPU 计算路径 CUDA Graph。默认保留 finite 检查，输出工作区会复用，详见 [准备/执行与 Graph 报告](docs/prepared_decode_20261102.md)。
 - prefill 阶段说明见 `docs/coverage_20261101.md`；decode API、边界和验收见 `docs/decode_paged_20261101.md`。
 
-2026-11-02 单 A40 最终完整回归：**515 项通过、2 项双卡测试按授权范围跳过**。已复用真实 Qwen2 架构预训练首层权重，完成 24 步 teacher-forced decode；未验证完整模型质量。
+2026-11-03 单 A40 完整回归：**531 项通过、2 项双卡测试按授权范围跳过**。新增实验性 Qwen2.5-0.5B base 完整 24 层集成、完整 GPU 前向 Graph、固定语料质量与配对延迟测试，详见 [完整模型报告](docs/full_model_20261103.md)。
+
+**完整模型的新结论**：dense Graph 的稳态 decode 约 4.13–4.38 ms，相对原生 HF eager FA2 为 4.28–4.61×；这是固定容量 batch=1 的 Graph/集成收益，不是 MoBA 算法收益或完整请求加速。FA2 自动 split-KV dense Graph 已快于本次真正稀疏的配置。直接替换为 MoBA topk=2/4/8 时，固定 8188 个目标的 PPL 约 63.00/24.56/14.72，dense 为 12.40；**没有无损加速结论**。packed QKV 保留为 opt-in 候选。
 
 最新准备接口+Graph 对上一阶段 cab3 eager、相同严格检查契约，28 配置×两轮的 attend/step 几何平均分别改善 **2.017×/2.612×**。trusted 模式单列，不能与严格模式混用；仍有配置慢于 dense FA core。全部数据见准备/执行报告。
 
 上一阶段按请求路由与 metadata 优化对冻结 cache v1 的结果为 **1.321×/1.661×**，保留在 [历史阶段报告](docs/decode_perf_20261102.md)，不与新基线混成同一数字。
 
-下方加速数字属于历史 MHA 基线，不代表新 GQA/decode 的性能；完整模型服务、完整模型全图 Graph 和 cache backward 不在当前声明范围。
+下方加速数字属于历史 MHA 基线，不代表新 GQA/decode 的性能；完整模型 Graph 仅验证了实验性 Qwen2 batch=1 固定容量路径，模型服务、动态 batching、采样与 cache backward 不在当前声明范围。
 
 ## 历史 MHA 基线结果（56eedcd，不代表新 GQA/decode 的性能）
 

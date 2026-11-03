@@ -1,13 +1,17 @@
-# 已知限制与适用边界（更新至 2026-11-02）
+# 已知限制与适用边界（更新至 2026-11-03）
 
-## 当前支持范围（2026-11-02）
+## 当前支持范围（2026-11-03）
 
 `opt_gqa_cuda` 支持 MHA/GQA/MQA prefill，Hq 必须为 Hkv 的正整数倍，
 D=8..256 且为 8 的倍数，BF16/FP16。完整契约和测试见 `coverage_20261101.md`。
 后续已实现连续/分页 KV cache 与增量 decode，详见 `decode_paged_20261101.md`。
 decode 独立支持 D=1..256 的整数；只做 inference，不支持 cache backward、
-跨 stream、共享前缀页/COW、滑动窗口或自动扩容。普通 cache API 拒绝外部 capture；新增 PreparedDecode 支持固定活动请求的 GPU 计算路径 Graph，CPU 管理与完整模型全图不在捕获范围。接口、真实权重单层验证与最新性能见 `prepared_decode_20261102.md`。原生 GQA prefill 尚无新增正式性能结论；
+跨 stream、共享前缀页/COW、滑动窗口或自动扩容。普通 cache API 拒绝外部 capture；PreparedDecode 支持固定活动请求的 GPU 计算路径 Graph，CPU 管理不在捕获范围。接口、真实权重单层验证与算子性能见 `prepared_decode_20261102.md`。原生 GQA prefill 尚无新增正式性能结论；
 decode 旧阶段相对冻结 cache v1 的 28 配置性能取证见 `decode_perf_20261102.md`。最新 Prepared Graph trusted 模式仍有 14–15/28 配置慢于 dense FA core，不构成普遍加速结论；单层数值对齐不等于完整模型质量验证。
+
+新增实验性 `examples/full_qwen2.py` 集成完整 Qwen2.5-0.5B base，支持完整 GPU 前向 Graph，包含 24 层 MLP 与 LM head；CPU 页管理和 token staging 仍在图外。仅 batch=1、固定容量、单 stream、teacher-forced，未验证动态 batching、padding、调度或服务。FA2 dense 对照使用新建单请求的连续物理页视图，不能用于任意碎片化 cache；默认允许 FA2 自动 split-KV。模型内部有限 Q/K/V 为显式假设。
+
+完整模型质量仅评估 WikiText-2 tokenized test 的前 4×2048-token 块（8188 个目标）、128 个 continuation 目标与六个 synthetic passkey。直接替换为 MoBA 会降低质量；正式 36 行延迟没有证明真正稀疏路径优于所测 dense Graph。相对 HF eager 的约 4.3–4.6× 是 dense Graph/集成收益，不是稀疏算法或完整请求收益。packed QKV 仅为 opt-in，数值差异接近短用例门槛；独立 sparse prefill 不保证跨运行逐位复现。早期 Triton dense 完整模型对照未过数值门槛，未宣称已修复。详见 `full_model_20261103.md`，其中保留负面结果和适用边界。
 
 ## 历史 MHA 基线支持范围（方案 2.4，56eedcd）
 
