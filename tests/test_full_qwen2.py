@@ -45,3 +45,27 @@ def test_sparse_all_blocks_and_model_capacity_errors():
         with pytest.raises(ValueError,match='max_seq_len'):s.step(11)
         assert all(c.lengths==(10,) for c in s.caches)
         with pytest.raises(ValueError,match='token'):s.step(-1)
+
+
+@pytest.mark.parametrize('backend',['attention_graph','model_graph'])
+@pytest.mark.parametrize('packed',[False,True])
+def test_sparse_graph_matches_eager_across_page_and_chunk_boundaries(backend,packed):
+    m=model();ids=torch.arange(1,12,device='cuda')[None]
+    kwargs=dict(mode='moba',chunk=4,topk=2,page=4,fused_qkv=packed)
+    with torch.inference_mode(),FullQwen2Session(m,24,backend='eager',**kwargs) as eager, \
+            FullQwen2Session(m,24,backend=backend,**kwargs) as graph:
+        assert not graph.effective_dense
+        torch.testing.assert_close(eager.prefill_hidden(ids),graph.prefill_hidden(ids),atol=0,rtol=0)
+        before=[c.materialize(0) for c in graph.caches]
+        eager.prepare();graph.prepare()
+        for c,(k,v) in zip(graph.caches,before):
+            assert c.lengths==(11,)
+            actual=c.materialize(0)
+            assert torch.equal(actual[0],k) and torch.equal(actual[1],v)
+        for token in range(12,24):
+            torch.testing.assert_close(eager.step(token),graph.step(token),atol=0,rtol=0)
+            for a,b in zip(eager.plans,graph.plans):
+                assert torch.equal(a.selected,b.selected)
+                assert a.lengths==b.lengths==(token,)
+                ak,av=a.cache.materialize(0);bk,bv=b.cache.materialize(0)
+                assert torch.equal(ak,bk) and torch.equal(av,bv)

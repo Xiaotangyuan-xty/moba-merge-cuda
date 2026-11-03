@@ -17,7 +17,7 @@ from moba_opt.ops import paged_decode as page_ops
 
 class FullQwen2Session:
     def __init__(self,model,capacity,*,mode='dense',chunk=128,topk=4,
-                 backend='eager',fused_qkv=False,page=16,dense_backend='fa2'):
+                 backend='eager',fused_qkv=False,page=16,dense_backend='fa2',dense_num_splits=0):
         if mode not in ('dense','moba'):raise ValueError('mode')
         if backend not in ('eager','attention_graph','model_graph'):raise ValueError('backend')
         if model.config.model_type!='qwen2':raise ValueError('Qwen2 architecture required')
@@ -29,7 +29,10 @@ class FullQwen2Session:
         self.model,self.capacity=model,capacity
         self.mode,self.chunk,self.topk,self.backend=mode,chunk,topk,backend
         if dense_backend not in ('fa2','triton'):raise ValueError('dense backend')
+        if isinstance(dense_num_splits,bool) or not isinstance(dense_num_splits,int) or dense_num_splits<0:
+            raise ValueError('dense_num_splits must be a nonnegative integer; 0 uses FA2 auto splitting')
         self.dense_backend=dense_backend
+        self.dense_num_splits=dense_num_splits
         self.all_selected=mode=='moba' and (self.capacity+chunk-1)//chunk<=topk
         self.effective_dense=mode=='dense' or topk==1 or self.all_selected
         if backend=='attention_graph' and self.effective_dense and dense_backend=='fa2':
@@ -130,7 +133,8 @@ class FullQwen2Session:
                     page_ops.append_tokens(p.k,p.v,c.k_cache,c.v_cache,c._table,p.gpu_ids,p.positions)
                     step_ops.step_means(c.k_cache,c._table,c._means,p.gpu_ids,p.positions,c.chunk_size)
                     dk,dv=self.dense_views[i]
-                    out=flash_attn_with_kvcache(p.q[:,None],dk,dv,cache_seqlens=c._lengths,causal=True,num_splits=1)
+                    out=flash_attn_with_kvcache(p.q[:,None],dk,dv,cache_seqlens=c._lengths,
+                                              causal=True,num_splits=self.dense_num_splits)
                     p.output.copy_(out[:,0])
                 elif self.backend=='attention_graph':p._run('step',True)
                 else:p._compute(True)

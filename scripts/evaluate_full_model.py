@@ -197,6 +197,7 @@ def paired_latency(model,tokens,args):
                     hf_first_token_ms=base_init+base_prefill,candidate_first_token_ms=candidate_init+candidate_prefill,
                     semantic_dense_fastpath=getattr(candidate,'all_selected',False),
                     attention_backend='fa2' if getattr(candidate,'effective_dense',True) else 'moba_triton',
+                    dense_num_splits=getattr(candidate,'dense_num_splits',None),
                     hf_step_ms=statistics.median(base_m),candidate_step_ms=statistics.median(cand_m),
                     paired_speedup=statistics.median(a/b for a,b in zip(base_m,cand_m))))
                 print(json.dumps({k:v for k,v in rows[-1].items() if k!='samples'}),flush=True)

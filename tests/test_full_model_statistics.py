@@ -1,6 +1,6 @@
 import math
 import pytest
-from scripts.summarize_full_model import quality_summary,METHODS
+from scripts.summarize_full_model import quality_summary,latency_summary,METHODS
 
 
 def sample():
@@ -23,3 +23,28 @@ def test_missing_or_nonfinite_quality_is_rejected():
     with pytest.raises(ValueError,match='matrix'):quality_summary(data)
     data=sample();data['result']['rows'][0]['nll_sum']=float('nan')
     with pytest.raises(ValueError,match='loss'):quality_summary(data)
+
+
+def latency_sample():
+    samples=[]
+    for i in range(2):
+        order=['hf_fa2','dense_modelgraph'] if i==0 else ['dense_modelgraph','hf_fa2']
+        for name in order:
+            samples.append(dict(round=0,sample=i,impl=name,order=order,wall_ms=2 if name=='hf_fa2' else 3))
+    row=dict(method='dense_modelgraph',prefix=256,samples=samples,first_decode_ms={},
+             prepare_capture_ms=10,hf_init_ms=1,candidate_init_ms=2,hf_prefill_ms=4,candidate_prefill_ms=6)
+    return dict(status='ok',dirty=False,result=dict(rounds=1,samples_per_round=2,rows=[row]))
+
+
+def test_latency_keeps_regressions_and_does_not_claim_amortization():
+    r=latency_summary(latency_sample(),['dense_modelgraph'],[256])[0]
+    assert r['paired_speedup']==pytest.approx(2/3)
+    assert r['capture_break_even_tokens'] is None
+    assert r['request_break_even_decode_steps'] is None
+
+
+def test_latency_rejects_missing_pairs_and_wrong_ab_order():
+    data=latency_sample();data['result']['rows'][0]['samples'].pop()
+    with pytest.raises(ValueError,match='samples'):latency_summary(data,['dense_modelgraph'],[256])
+    data=latency_sample();data['result']['rows'][0]['samples'][0]['order'].reverse()
+    with pytest.raises(ValueError,match='order'):latency_summary(data,['dense_modelgraph'],[256])
