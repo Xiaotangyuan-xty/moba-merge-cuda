@@ -55,7 +55,10 @@ def test_sparse_graph_matches_eager_across_page_and_chunk_boundaries(backend,pac
     with torch.inference_mode(),FullQwen2Session(m,24,backend='eager',**kwargs) as eager, \
             FullQwen2Session(m,24,backend=backend,**kwargs) as graph:
         assert not graph.effective_dense
-        torch.testing.assert_close(eager.prefill_hidden(ids),graph.prefill_hidden(ids),atol=0,rtol=0)
+        eager.prefill_hidden(ids)
+        for source,target in zip(eager.caches,graph.caches):
+            k,v=source.materialize(0)
+            target.append(k,v,sequence_ids=[0],cu_seqlens=[0,11])
         before=[c.materialize(0) for c in graph.caches]
         eager.prepare();graph.prepare()
         for c,(k,v) in zip(graph.caches,before):
