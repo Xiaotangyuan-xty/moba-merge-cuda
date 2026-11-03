@@ -1,0 +1,58 @@
+{
+  "models": {
+    "Qwen/Qwen2.5-0.5B": {
+      "revision": "060db6499f32faf8b98477b0a26969ef7d8b9987",
+      "weight_sha256": "88c142557820ccad55bb59756bfcfcf891de9cc6202816bd346445188a0ed342",
+      "bytes": 988097824
+    },
+    "Qwen/Qwen2.5-1.5B": {
+      "model": "Qwen/Qwen2.5-1.5B",
+      "revision": "8faed761d45a263340a0528343f099c05c9a4323",
+      "files": {
+        "config.json": {
+          "bytes": 684,
+          "sha256": "0e8c8aa86468aba09c9d32157ff4bc2301c7e6c50e4398960425b2ea71e66f77"
+        },
+        "generation_config.json": {
+          "bytes": 138,
+          "sha256": "8c970692323e3ea0e9b8b0a4dca79388d31226e41f83c9fd6014804280ebf6e8"
+        },
+        "tokenizer.json": {
+          "bytes": 7031645,
+          "sha256": "c0382117ea329cdf097041132f6d735924b697924d6f6fc3945713e96ce87539"
+        },
+        "tokenizer_config.json": {
+          "bytes": 7228,
+          "sha256": "c91efca15ceff6e9ee9424db58a6f59cd41294e550a86cbd07e3c1fb500b34f9"
+        },
+        "merges.txt": {
+          "bytes": 1671839,
+          "sha256": "599bab54075088774b1733fde865d5bd747cbcc7a547c5bc12610e874e26f5e3"
+        },
+        "vocab.json": {
+          "bytes": 2776833,
+          "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910"
+        },
+        "model.safetensors": {
+          "bytes": 3087467144,
+          "sha256": "a961db72e75d52b18e6b0c9d379e51a26973b233385e0e127fdda7d648aec796"
+        }
+      }
+    }
+  },
+  "corpus_source_revision": "pytorch/examples@d5678bc8ac0cdd79dbd5e44d4130271018bcec4e",
+  "corpus": {
+    "train": {
+      "bytes": 10797148,
+      "sha256": "9e9fa1ad55b1c2c95b08e37dd8e653f638fac2c6de904b79e813611eefbc985f"
+    },
+    "valid": {
+      "bytes": 1121681,
+      "sha256": "f0737ed31fc1329026e95cb8b98e19c2a182c39c240ab909dc31abf2f8af58e8"
+    },
+    "test": {
+      "bytes": 1256449,
+      "sha256": "d790b833ef8cf03a90db7bf1271b7520b83c45ce07ba3c1a9699df81e239eca0"
+    }
+  }
+}

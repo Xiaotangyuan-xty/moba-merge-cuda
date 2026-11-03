@@ -1,5 +1,7 @@
 # Qwen2.5-0.5B 完整模型集成、质量与 Graph 实验
 
+后续已完成确定顺序合并与混合策略实验，见 [稳定性与长上下文报告](stable_quality_20261103.md)。下文保留本阶段原始配置、数值问题和结论。
+
 日期：2026-11-03。模型为 **Qwen/Qwen2.5-0.5B base**，没有稀疏训练或微调。单 A40、BF16、batch=1、固定请求容量、teacher-forced decode。实现位于 `examples/full_qwen2.py`，属于实验性集成。
 
 本阶段完成完整模型 eager、Attention core Graph、完整 GPU 前向 Graph，以及可选 packed QKV。**主要有效收益来自完整模型 Graph。当前实验不支持“MoBA 在该模型上无损加速”的结论。** 使用 FA2 自动 split-KV 的 dense Graph 后，真正稀疏的配置均没有超过所测 dense Graph；直接替换稀疏 Attention 还会显著损害质量。

@@ -1,0 +1,22 @@
+{
+  "stable_quality_20261103_assets.json": "38970ad3431d0db791dceefe95301026d790d236c40db330cf870ab46000e971",
+  "stable_quality_20261103_calibrate_05_v1.json": "baa9abf2341ec53ba953913a15fffe1df365a70ffebf5745979ce404340c9017",
+  "stable_quality_20261103_calibrate_15_v1.json": "9c202d65d8956688fb6c094d9d9d2a6785c1f7eb84cd69fa82f0decce66a4949",
+  "stable_quality_20261103_evaluate_05_final.json": "c00c7ba1920458d8985787f967143e96673630afd7a8ebbcbd2aff175cc9911d",
+  "stable_quality_20261103_evaluate_05_v1.json": "830de4e0acd9f675fadb9009e0278df41b2309da174927b2a2d283600ec84a03",
+  "stable_quality_20261103_evaluate_15_final.json": "0912dc547cf64ec38bc1a3827efecfaadfdcbf0e71a4e865e1584c304b0bea36",
+  "stable_quality_20261103_evaluate_15_v1.json": "71b5f3c4f42b074caf7cad8fd5922546ec2fbece9874ff1f82ef131da58c8372",
+  "stable_quality_20261103_integration_15_v1.json": "f869600a39a8eda5d365a3af639d86f64615aa97ac13e689bdd81b0d500a10ae",
+  "stable_quality_20261103_long_05_final.json": "76f5c654250394d2b94000b0a7de9160dac80950d0003e9fed960c71605a8b14",
+  "stable_quality_20261103_long_05_v1.json": "82c11236a1df235ccbbaeeba0c11d63d12d200a4d5158a792cce9af71e872465",
+  "stable_quality_20261103_long_15_v1.json": "2886461feeead136df9eaa934ee09ea249f87fd19af041407a5d591666c41cea",
+  "stable_quality_20261103_long_repeat_15_v1.json": "f99d45ed7429e8ca22aa73ae1fee496cbeb45ea723363f9f9641eef1bb69ce27",
+  "stable_quality_20261103_notes.json": "77e72fde5f06ae55bb8944adc6f466022e94976dbf455470bdc9ce5b7cfef4d5",
+  "stable_quality_20261103_quality_all_rows.csv": "4dea7fb79244d95d301fdc7219cdc4d92349f4c3acabf4856b99d707f5a87014",
+  "stable_quality_20261103_retrieve_15_final.json": "d6d5efd5a9234a4ecde36a34c33ac459b5ada179eeb412010f27ce1a9b948b8a",
+  "stable_quality_20261103_retrieve_15_v1.json": "4bb41f85e23b6ae1aa8edb382385bfc75cbdca6af3d685b97d726c2aad6b85dd",
+  "stable_quality_20261103_stability_05_v1.json": "d12d00c4a4ba6200bd8f80f4c6c8b03054608b4c6ad858acd6c2c730a7ffeff8",
+  "stable_quality_20261103_stability_15_v1.json": "946a4f7feaf32acb4c0a900f51fb9c568f5103fffdf265a316035009f992e472",
+  "stable_quality_20261103_summary.json": "0ca9f086a95b667035d6e0aeeebb9bf424794ba3f4e11c4d8317a4798ab37aab",
+  "stable_quality_20261103_timing_all_rows.csv": "e8eb1408a6ef4bc1442ce4b245cbdf782597e43d0bd842a0aa577e1c740eaa25"
+}

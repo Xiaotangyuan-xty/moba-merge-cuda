@@ -1,0 +1,271 @@
+{
+  "stage": "integration",
+  "model_config": {
+    "vocab_size": 151936,
+    "max_position_embeddings": 131072,
+    "hidden_size": 1536,
+    "intermediate_size": 8960,
+    "num_hidden_layers": 28,
+    "num_attention_heads": 12,
+    "use_sliding_window": false,
+    "sliding_window": 131072,
+    "max_window_layers": 28,
+    "num_key_value_heads": 2,
+    "hidden_act": "silu",
+    "initializer_range": 0.02,
+    "rms_norm_eps": 1e-06,
+    "use_cache": true,
+    "rope_theta": 1000000.0,
+    "rope_scaling": null,
+    "attention_dropout": 0.0,
+    "return_dict": true,
+    "output_hidden_states": false,
+    "output_attentions": false,
+    "torchscript": false,
+    "torch_dtype": "bfloat16",
+    "use_bfloat16": false,
+    "tf_legacy_loss": false,
+    "pruned_heads": {},
+    "tie_word_embeddings": true,
+    "chunk_size_feed_forward": 0,
+    "is_encoder_decoder": false,
+    "is_decoder": false,
+    "cross_attention_hidden_size": null,
+    "add_cross_attention": false,
+    "tie_encoder_decoder": false,
+    "max_length": 20,
+    "min_length": 0,
+    "do_sample": false,
+    "early_stopping": false,
+    "num_beams": 1,
+    "num_beam_groups": 1,
+    "diversity_penalty": 0.0,
+    "temperature": 1.0,
+    "top_k": 50,
+    "top_p": 1.0,
+    "typical_p": 1.0,
+    "repetition_penalty": 1.0,
+    "length_penalty": 1.0,
+    "no_repeat_ngram_size": 0,
+    "encoder_no_repeat_ngram_size": 0,
+    "bad_words_ids": null,
+    "num_return_sequences": 1,
+    "output_scores": false,
+    "return_dict_in_generate": false,
+    "forced_bos_token_id": null,
+    "forced_eos_token_id": null,
+    "remove_invalid_values": false,
+    "exponential_decay_length_penalty": null,
+    "suppress_tokens": null,
+    "begin_suppress_tokens": null,
+    "architectures": [
+      "Qwen2ForCausalLM"
+    ],
+    "finetuning_task": null,
+    "id2label": {
+      "0": "LABEL_0",
+      "1": "LABEL_1"
+    },
+    "label2id": {
+      "LABEL_0": 0,
+      "LABEL_1": 1
+    },
+    "tokenizer_class": null,
+    "prefix": null,
+    "bos_token_id": 151643,
+    "pad_token_id": null,
+    "eos_token_id": 151643,
+    "sep_token_id": null,
+    "decoder_start_token_id": null,
+    "task_specific_params": null,
+    "problem_type": null,
+    "_attn_implementation_autoset": true,
+    "transformers_version": "4.49.0",
+    "model_type": "qwen2",
+    "use_mrope": false
+  },
+  "model_config_sha256": "0e8c8aa86468aba09c9d32157ff4bc2301c7e6c50e4398960425b2ea71e66f77",
+  "corpus_sha256": "d790b833ef8cf03a90db7bf1271b7520b83c45ce07ba3c1a9699df81e239eca0",
+  "git_head": "5470866f1b47c2551ebc78fc211c2103483cdcfe",
+  "dirty": false,
+  "dtype": "bf16",
+  "batch": 1,
+  "torch": "2.4.0+cu121",
+  "gpu": "NVIDIA A40",
+  "tf32": false,
+  "allocator_gib": 7,
+  "status": "ok",
+  "result": {
+    "scope": "native HF FA2 versus complete dense/all-selected Graph;128prefix+12steps;fixed prior tolerances",
+    "rows": [
+      {
+        "method": "dense",
+        "all_selected": true,
+        "checks": [
+          {
+            "max_abs": 0.0,
+            "relative_l2": 0.0,
+            "kl": 0.0,
+            "top1_agreement": 1.0
+          },
+          {
+            "max_abs": 0.0,
+            "relative_l2": 0.0,
+            "kl": 0.0,
+            "top1_agreement": 1.0
+          },
+          {
+            "max_abs": 0.0,
+            "relative_l2": 0.0,
+            "kl": 0.0,
+            "top1_agreement": 1.0
+          },
+          {
+            "max_abs": 0.0,
+            "relative_l2": 0.0,
+            "kl": 0.0,
+            "top1_agreement": 1.0
+          },
+          {
+            "max_abs": 0.0,
+            "relative_l2": 0.0,
+            "kl": 0.0,
+            "top1_agreement": 1.0
+          },
+          {
+            "max_abs": 0.0,
+            "relative_l2": 0.0,
+            "kl": 0.0,
+            "top1_agreement": 1.0
+          },
+          {
+            "max_abs": 0.0,
+            "relative_l2": 0.0,
+            "kl": 0.0,
+            "top1_agreement": 1.0
+          },
+          {
+            "max_abs": 0.0,
+            "relative_l2": 0.0,
+            "kl": 0.0,
+            "top1_agreement": 1.0
+          },
+          {
+            "max_abs": 0.0,
+            "relative_l2": 0.0,
+            "kl": 0.0,
+            "top1_agreement": 1.0
+          },
+          {
+            "max_abs": 0.0,
+            "relative_l2": 0.0,
+            "kl": 0.0,
+            "top1_agreement": 1.0
+          },
+          {
+            "max_abs": 0.0,
+            "relative_l2": 0.0,
+            "kl": 0.0,
+            "top1_agreement": 1.0
+          },
+          {
+            "max_abs": 0.0,
+            "relative_l2": 0.0,
+            "kl": 0.0,
+            "top1_agreement": 1.0
+          },
+          {
+            "max_abs": 0.0,
+            "relative_l2": 0.0,
+            "kl": 0.0,
+            "top1_agreement": 1.0
+          }
+        ]
+      },
+      {
+        "method": "stable_k4",
+        "all_selected": true,
+        "checks": [
+          {
+            "max_abs": 0.0,
+            "relative_l2": 0.0,
+            "kl": 0.0,
+            "top1_agreement": 1.0
+          },
+          {
+            "max_abs": 0.0,
+            "relative_l2": 0.0,
+            "kl": 0.0,
+            "top1_agreement": 1.0
+          },
+          {
+            "max_abs": 0.0,
+            "relative_l2": 0.0,
+            "kl": 0.0,
+            "top1_agreement": 1.0
+          },
+          {
+            "max_abs": 0.0,
+            "relative_l2": 0.0,
+            "kl": 0.0,
+            "top1_agreement": 1.0
+          },
+          {
+            "max_abs": 0.0,
+            "relative_l2": 0.0,
+            "kl": 0.0,
+            "top1_agreement": 1.0
+          },
+          {
+            "max_abs": 0.0,
+            "relative_l2": 0.0,
+            "kl": 0.0,
+            "top1_agreement": 1.0
+          },
+          {
+            "max_abs": 0.0,
+            "relative_l2": 0.0,
+            "kl": 0.0,
+            "top1_agreement": 1.0
+          },
+          {
+            "max_abs": 0.0,
+            "relative_l2": 0.0,
+            "kl": 0.0,
+            "top1_agreement": 1.0
+          },
+          {
+            "max_abs": 0.0,
+            "relative_l2": 0.0,
+            "kl": 0.0,
+            "top1_agreement": 1.0
+          },
+          {
+            "max_abs": 0.0,
+            "relative_l2": 0.0,
+            "kl": 0.0,
+            "top1_agreement": 1.0
+          },
+          {
+            "max_abs": 0.0,
+            "relative_l2": 0.0,
+            "kl": 0.0,
+            "top1_agreement": 1.0
+          },
+          {
+            "max_abs": 0.0,
+            "relative_l2": 0.0,
+            "kl": 0.0,
+            "top1_agreement": 1.0
+          },
+          {
+            "max_abs": 0.0,
+            "relative_l2": 0.0,
+            "kl": 0.0,
+            "top1_agreement": 1.0
+          }
+        ]
+      }
+    ]
+  }
+}

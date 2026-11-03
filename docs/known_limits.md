@@ -11,7 +11,11 @@ decode 旧阶段相对冻结 cache v1 的 28 配置性能取证见 `decode_perf_
 
 新增实验性 `examples/full_qwen2.py` 集成完整 Qwen2.5-0.5B base，支持完整 GPU 前向 Graph，包含 24 层 MLP 与 LM head；CPU 页管理和 token staging 仍在图外。仅 batch=1、固定容量、单 stream、teacher-forced，未验证动态 batching、padding、调度或服务。FA2 dense 对照使用新建单请求的连续物理页视图，不能用于任意碎片化 cache；默认允许 FA2 自动 split-KV。模型内部有限 Q/K/V 为显式假设。
 
-完整模型质量仅评估 WikiText-2 tokenized test 的前 4×2048-token 块（8188 个目标）、128 个 continuation 目标与六个 synthetic passkey。直接替换为 MoBA 会降低质量；正式 36 行延迟没有证明真正稀疏路径优于所测 dense Graph。相对 HF eager 的约 4.3–4.6× 是 dense Graph/集成收益，不是稀疏算法或完整请求收益。packed QKV 仅为 opt-in，数值差异接近短用例门槛；独立 sparse prefill 不保证跨运行逐位复现。早期 Triton dense 完整模型对照未过数值门槛，未宣称已修复。详见 `full_model_20261103.md`，其中保留负面结果和适用边界。
+最新支持显式 `deterministic_merge=True`、`route_precision='fp32'`、`stable_routes=True`，以及 `dense_layers`/`prefill_mode` 实验性模型策略。warp 内排序固定合并次序；FP32 均值与完全同分时优先更小 chunk 的规则构成新策略，可能改变上游路由。默认行为保持兼容，旧版选块逐位一致声明不推广到这些新策略。Qwen2.5-0.5B/1.5B 当前重复 prefill 实验不再漂移，不保证跨平台、矩阵形状变化、量化或输入扰动后的路由一致性。
+
+新增独立 train/valid 校准的混合策略与 1.5B 完整模型测试。0.5B/1.5B held-out prefill PPL 分别恢复至12.86/9.78，dense为12.40/9.19；部分测试指标仍未达到校准时的ΔNLL≤0.05目标。2K校准策略的质量预算未泛化到长上下文。0.5B约32K可运行；1.5B仅确认至16K，约32K在7GiB allocator/8GiB设备监控限制下OOM。MLP分块候选因真实模型数值验证失败被撤回。48行长上下文比较不构成普遍快于dense Graph的证据，详见 `stable_quality_20261103.md`。
+
+前一完整模型阶段质量仅评估 WikiText-2 tokenized test 的前 4×2048-token 块（8188 个目标）、128 个 continuation 目标与六个 synthetic passkey。该阶段正式 36 行延迟没有证明真正稀疏路径优于所测 dense Graph。相对 HF eager 的约 4.3–4.6× 是 dense Graph/集成收益，不是稀疏算法或完整请求收益。packed QKV 仅为 opt-in，数值差异接近短用例门槛；默认旧 sparse prefill 不保证跨运行逐位复现。早期 Triton dense 完整模型对照未过数值门槛，未宣称已修复。详见 `full_model_20261103.md`，其中保留负面结果和适用边界；新阶段的512-target continuation及长上下文诊断单列。
 
 ## 历史 MHA 基线支持范围（方案 2.4，56eedcd）
 

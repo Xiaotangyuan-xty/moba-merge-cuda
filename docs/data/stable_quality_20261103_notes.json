@@ -1,0 +1,36 @@
+{
+  "final_inference_commit": "5999a60189da4902c2e9c69defe6eb4a95949f21",
+  "final_tests": {
+    "passed": 546,
+    "skipped": 2,
+    "failed": 0,
+    "scope": "single GPU;dual GPU skipped",
+    "seconds": 22.921
+  },
+  "resource": {
+    "process_wall_seconds": 633.6075363531709,
+    "monitor_peak_device_mib": 7199,
+    "process_limit_seconds": 1200,
+    "device_limit_mib": 8192,
+    "allocator_limit_gib": 7
+  },
+  "rejected_candidates": [
+    {
+      "name": "prefill tokenwise MLP chunking",
+      "commit": "c795bab8a31c1fbc6a28cedbc95caa7d2bad4949",
+      "prefix": 8192,
+      "max_abs": 1.953125,
+      "relative_l2": 0.1005738377571106,
+      "kl": 0.030831243842840195,
+      "top1_agreement": 0.6875,
+      "decision": "rejected and reverted;original fixed validation thresholds retained;cause not established"
+    }
+  ],
+  "limits": [
+    "policy calibration on2048 does not guarantee long-context quality",
+    "calibration target deltaNLL<=0.05 is not met by every held-out metric",
+    "no cross-hardware or perturbed-input route invariance claim",
+    "1.5B32K exceeds allocator cap;all OOM rows preserved",
+    "no weight training or lossless sparse acceleration claim"
+  ]
+}

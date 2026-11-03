@@ -1,0 +1,150 @@
+{
+  "calibrations": [
+    {
+      "source": "stable_quality_20261103_calibrate_05_v1.json",
+      "policy": {
+        "dense_layers": [
+          3,
+          4,
+          5,
+          6,
+          7,
+          9,
+          10,
+          11,
+          13,
+          16,
+          17,
+          18
+        ]
+      },
+      "sparse_layers": 12,
+      "threshold": 0.05
+    },
+    {
+      "source": "stable_quality_20261103_calibrate_15_v1.json",
+      "policy": {
+        "dense_layers": [
+          2,
+          3,
+          4,
+          5,
+          6,
+          8,
+          9,
+          10,
+          12,
+          14,
+          19,
+          20,
+          22,
+          23
+        ]
+      },
+      "sparse_layers": 14,
+      "threshold": 0.05
+    }
+  ],
+  "diagnostics": [
+    {
+      "source": "stable_quality_20261103_retrieve_15_final.json",
+      "method": "dense",
+      "scope": "six synthetic cases, preserve OOM",
+      "correct": 4,
+      "completed": 4,
+      "oom": 2
+    },
+    {
+      "source": "stable_quality_20261103_retrieve_15_final.json",
+      "method": "stable_k4",
+      "scope": "six synthetic cases, preserve OOM",
+      "correct": 0,
+      "completed": 4,
+      "oom": 2
+    },
+    {
+      "source": "stable_quality_20261103_retrieve_15_final.json",
+      "method": "calibrated_k4",
+      "scope": "six synthetic cases, preserve OOM",
+      "correct": 4,
+      "completed": 4,
+      "oom": 2
+    },
+    {
+      "source": "stable_quality_20261103_retrieve_15_v1.json",
+      "method": "dense",
+      "scope": "six synthetic cases, preserve OOM",
+      "correct": 4,
+      "completed": 4,
+      "oom": 2
+    },
+    {
+      "source": "stable_quality_20261103_retrieve_15_v1.json",
+      "method": "stable_k4",
+      "scope": "six synthetic cases, preserve OOM",
+      "correct": 0,
+      "completed": 4,
+      "oom": 2
+    },
+    {
+      "source": "stable_quality_20261103_retrieve_15_v1.json",
+      "method": "calibrated_k4",
+      "scope": "six synthetic cases, preserve OOM",
+      "correct": 4,
+      "completed": 4,
+      "oom": 2
+    },
+    {
+      "source": "stable_quality_20261103_stability_05_v1.json",
+      "method": "atomic",
+      "scope": "within-process identical prefill",
+      "all_logits_equal": false,
+      "max_relative_l2": 0.08038493245840073,
+      "max_differing_route_layers": 22
+    },
+    {
+      "source": "stable_quality_20261103_stability_05_v1.json",
+      "method": "canonical",
+      "scope": "within-process identical prefill",
+      "all_logits_equal": true,
+      "max_relative_l2": 0.0,
+      "max_differing_route_layers": 0
+    },
+    {
+      "source": "stable_quality_20261103_stability_05_v1.json",
+      "method": "fp32_stable",
+      "scope": "within-process identical prefill",
+      "all_logits_equal": true,
+      "max_relative_l2": 0.0,
+      "max_differing_route_layers": 0
+    },
+    {
+      "source": "stable_quality_20261103_stability_15_v1.json",
+      "method": "atomic",
+      "scope": "within-process identical prefill",
+      "all_logits_equal": false,
+      "max_relative_l2": 0.13989794254302979,
+      "max_differing_route_layers": 26
+    },
+    {
+      "source": "stable_quality_20261103_stability_15_v1.json",
+      "method": "canonical",
+      "scope": "within-process identical prefill",
+      "all_logits_equal": true,
+      "max_relative_l2": 0.0,
+      "max_differing_route_layers": 0
+    },
+    {
+      "source": "stable_quality_20261103_stability_15_v1.json",
+      "method": "fp32_stable",
+      "scope": "within-process identical prefill",
+      "all_logits_equal": true,
+      "max_relative_l2": 0.0,
+      "max_differing_route_layers": 0
+    }
+  ],
+  "quality_rows": 40,
+  "timing_rows": 48,
+  "timing_regressions": 28,
+  "timing_oom": 8
+}

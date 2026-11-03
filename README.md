@@ -8,7 +8,9 @@
 - `prepare_decode`：固定活动请求、每步一个 token 的预分配执行接口，增量页表与 GPU 长度推进；支持显式 GPU 计算路径 CUDA Graph。默认保留 finite 检查，输出工作区会复用，详见 [准备/执行与 Graph 报告](docs/prepared_decode_20261102.md)。
 - prefill 阶段说明见 `docs/coverage_20261101.md`；decode API、边界和验收见 `docs/decode_paged_20261101.md`。
 
-2026-11-03 单 A40 完整回归：**531 项通过、2 项双卡测试按授权范围跳过**。新增实验性 Qwen2.5-0.5B base 完整 24 层集成、完整 GPU 前向 Graph、固定语料质量与配对延迟测试，详见 [完整模型报告](docs/full_model_20261103.md)。
+2026-11-03 最新单 A40 完整回归：**546 项通过、2 项双卡测试按授权范围跳过**。完整模型集成和 Graph 的历史阶段见 [完整模型报告](docs/full_model_20261103.md)；最新结果见 [数值稳定性、质量适配与长上下文报告](docs/stable_quality_20261103.md)。
+
+新增显式的确定顺序 CUDA 合并、FP32 路由与同分选块规则；Qwen2.5-0.5B/1.5B 在当前重复 prefill 用例中 logits 与选块逐位一致。独立 train/valid 校准保留一半层为 dense 后，held-out PPL 从全稀疏 k4 的 **24.50/16.86 恢复至 12.86/9.78**（dense **12.40/9.19**）。这是不改权重的混合策略，仍有质量损失。已测试 0.5B 至约 32K、1.5B 至 16K；48 行长上下文比较保留全部退化与 OOM，没有普遍优于 dense Graph 的结论。
 
 **完整模型的新结论**：dense Graph 的稳态 decode 约 4.13–4.38 ms，相对原生 HF eager FA2 为 4.28–4.61×；这是固定容量 batch=1 的 Graph/集成收益，不是 MoBA 算法收益或完整请求加速。FA2 自动 split-KV dense Graph 已快于本次真正稀疏的配置。直接替换为 MoBA topk=2/4/8 时，固定 8188 个目标的 PPL 约 63.00/24.56/14.72，dense 为 12.40；**没有无损加速结论**。packed QKV 保留为 opt-in 候选。
 
