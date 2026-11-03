@@ -125,9 +125,9 @@ class PagedKVCache:
         if not bool(torch.isfinite(tensor).all()):
             raise ValueError(f"{name} contains NaN/Inf")
 
-    def prepare_decode(self,sequence_ids,num_q_heads,*,topk=4,mode="moba",check_finite=True):
+    def prepare_decode(self,sequence_ids,num_q_heads,*,topk=4,mode="moba",check_finite=True,stable_routes=False):
         from .prepared_decode import PreparedDecode
-        return PreparedDecode(self,sequence_ids,num_q_heads,topk=topk,mode=mode,check_finite=check_finite)
+        return PreparedDecode(self,sequence_ids,num_q_heads,topk=topk,mode=mode,check_finite=check_finite,stable_routes=stable_routes)
 
     def _append_counts(self, token_count, sequence_ids, cu_seqlens):
         ids = self._layout.validate_ids(_ints(sequence_ids, "sequence_ids"), unique=True)

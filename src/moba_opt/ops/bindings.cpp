@@ -10,7 +10,8 @@ std::vector<torch::Tensor> merge_forward_cuda(
     torch::Tensor remote_lse,
     torch::Tensor mapping,
     int64_t kmax,
-    bool check_capacity);
+    bool check_capacity,
+    bool deterministic);
 }  // namespace moba_opt
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
@@ -18,5 +19,5 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
         "atomic slot build + global-softmax merge (CUDA)",
         py::arg("self_out"), py::arg("self_lse"), py::arg("remote_out"),
         py::arg("remote_lse"), py::arg("mapping"), py::arg("kmax"),
-        py::arg("check_capacity") = true);
+        py::arg("check_capacity") = true, py::arg("deterministic") = false);
 }

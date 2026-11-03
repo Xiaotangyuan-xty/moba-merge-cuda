@@ -34,6 +34,7 @@ ROUTE_HOOK = None  # test-only; None in all performance paths
 # run in one process for paired benchmarks.
 MERGE_BACKEND_TRITON = 0
 MERGE_BACKEND_CUDA = 1
+MERGE_BACKEND_CUDA_SORTED = 2
 
 
 class OptMixedAttention(torch.autograd.Function):
@@ -96,7 +97,7 @@ class OptMixedAttention(torch.autograd.Function):
         # check_capacity=False: the official routing above selects at most
         # moba_topk chunks per query/head, so counts <= moba_topk = kmax <= kpad
         # holds structurally; the standalone merge APIs keep the check on.
-        if merge_backend == MERGE_BACKEND_CUDA:
+        if merge_backend in (MERGE_BACKEND_CUDA, MERGE_BACKEND_CUDA_SORTED):
             from .ops.merge_cuda import merge_forward_cuda
 
             output, mixed_attn_lse_sh = merge_forward_cuda(
@@ -107,6 +108,7 @@ class OptMixedAttention(torch.autograd.Function):
                 moba_q_sh_indices,
                 kmax=moba_topk,
                 check_capacity=False,
+                deterministic=merge_backend == MERGE_BACKEND_CUDA_SORTED,
             )
         else:
             output, mixed_attn_lse_sh = merge_forward(

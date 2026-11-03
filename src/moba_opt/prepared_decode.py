@@ -13,13 +13,15 @@ from .ops import prepared_decode as kernels
 
 
 class PreparedDecode:
-    def __init__(self,cache,sequence_ids,num_q_heads,*,topk=4,mode="moba",check_finite=True):
+    def __init__(self,cache,sequence_ids,num_q_heads,*,topk=4,mode="moba",check_finite=True,stable_routes=False):
         with cache._lock,torch.cuda.device(cache.device):
             cache._check_stream()
             self.num_q_heads=positive_int(num_q_heads,"num_q_heads")
             if self.num_q_heads%cache.num_kv_heads:
                 raise ValueError("Hq must be a multiple of Hkv")
             if not isinstance(check_finite,bool):raise ValueError("check_finite must be bool")
+            if not isinstance(stable_routes,bool):raise ValueError('stable_routes must be bool')
+            self.stable_routes=stable_routes
             self.dense=_mode(mode,topk)
             self.cache=cache
             self._state=IncrementalLayout(cache._layout,_ints(sequence_ids,"sequence_ids"))
@@ -103,7 +105,8 @@ class PreparedDecode:
         if not self.dense:
             if self.remote:
                 attention.route_scores(self.q,c._means,self.gpu_ids,self.positions,c.chunk_size,self.scores)
-                torch.topk(self.scores,self.remote,dim=-1,sorted=False,out=(self.values,self.indices))
+                if self.stable_routes:kernels.stable_topk(self.scores,self.values,self.indices)
+                else:torch.topk(self.scores,self.remote,dim=-1,sorted=False,out=(self.values,self.indices))
             kernels.selected(self.values,self.indices,self.positions,self.selected,c.chunk_size)
         attention.paged_attention(self.q,c.k_cache,c.v_cache,c._table,c._lengths,
             self.gpu_ids,self.positions,self.selected,self.output,self.lse,c.chunk_size,self.dense)

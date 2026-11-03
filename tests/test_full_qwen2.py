@@ -72,3 +72,19 @@ def test_sparse_graph_matches_eager_across_page_and_chunk_boundaries(backend,pac
                 assert a.lengths==b.lengths==(token,)
                 ak,av=a.cache.materialize(0);bk,bv=b.cache.materialize(0)
                 assert torch.equal(ak,bk) and torch.equal(av,bv)
+
+
+@pytest.mark.parametrize('dense_layers',[(),(0,),(1,)])
+def test_stable_hybrid_full_graph_and_independent_prefill(dense_layers):
+    m=model();ids=torch.arange(1,12,device='cuda')[None]
+    kwargs=dict(mode='moba',chunk=4,topk=2,page=4,dense_layers=dense_layers,
+                deterministic_merge=True,stable_routes=True,route_precision='fp32')
+    with torch.inference_mode(),FullQwen2Session(m,24,backend='eager',**kwargs) as a, \
+            FullQwen2Session(m,24,backend='model_graph',**kwargs) as b:
+        assert torch.equal(a.prefill_hidden(ids),b.prefill_hidden(ids))
+        a.prepare();b.prepare()
+        for token in range(12,24):
+            assert torch.equal(a.step(token),b.step(token))
+            for i,(p,q) in enumerate(zip(a.plans,b.plans)):
+                assert p.lengths==q.lengths
+                if not a.layer_dense[i]:assert torch.equal(p.selected,q.selected)

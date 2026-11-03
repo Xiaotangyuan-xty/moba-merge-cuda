@@ -72,3 +72,23 @@ def selected(values,indices,positions,out,chunk):
     remote=out.shape[-1]-1
     _selected[(out.shape[0]*out.shape[1],)](values,indices,positions,out,out.shape[1],
         chunk,remote,triton.next_power_of_2(max(1,remote)))
+
+
+@triton.jit
+def _stable_topk(SCORES,VALUES,INDICES,N:tl.constexpr,K:tl.constexpr,BLOCK:tl.constexpr):
+    row=tl.program_id(0)
+    index=tl.arange(0,BLOCK)
+    scores=tl.load(SCORES+row*N+index,mask=index<N,other=-float('inf'))
+    available=index<N
+    for slot in range(K):
+        value=tl.max(tl.where(available,scores,-float('inf')),axis=0)
+        winner=tl.min(tl.where((scores==value)&available,index,2147483647),axis=0)
+        tl.store(VALUES+row*K+slot,value)
+        tl.store(INDICES+row*K+slot,winner.to(tl.int64))
+        available=available&(index!=winner)
+
+
+def stable_topk(scores,values,indices):
+    """Descending score; exact ties choose the lowest chunk index."""
+    n=scores.shape[-1];k=values.shape[-1]
+    if k:_stable_topk[(scores.numel()//n,)](scores,values,indices,n,k,triton.next_power_of_2(n))

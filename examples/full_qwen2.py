@@ -17,7 +17,9 @@ from moba_opt.ops import paged_decode as page_ops
 
 class FullQwen2Session:
     def __init__(self,model,capacity,*,mode='dense',chunk=128,topk=4,
-                 backend='eager',fused_qkv=False,page=16,dense_backend='fa2',dense_num_splits=0):
+                 backend='eager',fused_qkv=False,page=16,dense_backend='fa2',dense_num_splits=0,
+                 deterministic_merge=False,stable_routes=False,route_precision='upstream',
+                 dense_layers=(),prefill_mode='match'):
         if mode not in ('dense','moba'):raise ValueError('mode')
         if backend not in ('eager','attention_graph','model_graph'):raise ValueError('backend')
         if model.config.model_type!='qwen2':raise ValueError('Qwen2 architecture required')
@@ -35,7 +37,18 @@ class FullQwen2Session:
         self.dense_num_splits=dense_num_splits
         self.all_selected=mode=='moba' and (self.capacity+chunk-1)//chunk<=topk
         self.effective_dense=mode=='dense' or topk==1 or self.all_selected
-        if backend=='attention_graph' and self.effective_dense and dense_backend=='fa2':
+        nlayer=len(model.model.layers)
+        dense_layers=tuple(dense_layers)
+        if len(set(dense_layers))!=len(dense_layers) or any(isinstance(i,bool) or not isinstance(i,int) or not 0<=i<nlayer for i in dense_layers):
+            raise ValueError('dense_layers must be unique valid layer indices')
+        if prefill_mode not in ('match','dense'):raise ValueError('prefill_mode')
+        if route_precision not in ('upstream','fp32'):raise ValueError('route_precision')
+        if not isinstance(deterministic_merge,bool) or not isinstance(stable_routes,bool):raise ValueError('stability flags must be bool')
+        self.layer_dense=tuple(self.effective_dense or i in dense_layers for i in range(nlayer))
+        self.prefill_mode=prefill_mode
+        self.route_config=dict(chunk_size=chunk,topk=topk,deterministic_merge=deterministic_merge,
+                               stable_routes=stable_routes,route_precision=route_precision)
+        if backend=='attention_graph' and any(self.layer_dense) and dense_backend=='fa2':
             raise ValueError('FA2 dense uses eager or model_graph; attention_graph is for the Triton core')
         self.fused_qkv=fused_qkv
         self.profile=False
@@ -94,8 +107,8 @@ class FullQwen2Session:
             residual=h
             q,k,v=self.project(i,layer.input_layernorm(h),cos,sin)
             self.caches[i].append(k,v,sequence_ids=[0],cu_seqlens=[0,t])
-            if self.effective_dense:out=flash_attn_func(q[None],k[None],v[None],causal=True)[0]
-            else:out=opt_gqa_cuda(q,k,v,cu,t,dict(chunk_size=self.chunk,topk=self.topk))
+            if self.layer_dense[i] or self.prefill_mode=='dense':out=flash_attn_func(q[None],k[None],v[None],causal=True)[0]
+            else:out=opt_gqa_cuda(q,k,v,cu,t,self.route_config)
             h=residual+layer.self_attn.o_proj(out.reshape(1,t,-1))
             h=h+layer.mlp(layer.post_attention_layernorm(h))
         return self.model.model.norm(h)
@@ -105,13 +118,15 @@ class FullQwen2Session:
         self.check()
         if self.plans:raise ValueError('already prepared')
         if not self.caches[0].lengths[0]:raise ValueError('prefill first')
-        if self.effective_dense and self.dense_backend=='fa2':
-            for c in self.caches:
+        if any(self.layer_dense) and self.dense_backend=='fa2':
+            for c,dense in zip(self.caches,self.layer_dense):
+                if not dense:continue
                 allocated=sum(x>=0 for x in c.page_table[0])
                 if c.page_table[0][:allocated]!=tuple(range(allocated)) or c._layout.free_pages!=tuple(range(c._layout.num_pages-1,allocated-1,-1)):
                     raise ValueError('dense FA2 control requires monotonic single-request physical pages')
-        self.plans=[c.prepare_decode([0],self.hq,mode='dense' if self.effective_dense else self.mode,topk=self.topk,check_finite=False)
-                    for c in self.caches]
+        self.plans=[c.prepare_decode([0],self.hq,mode='dense' if dense else self.mode,topk=self.topk,
+                                    check_finite=False,stable_routes=self.route_config['stable_routes'])
+                    for c,dense in zip(self.caches,self.layer_dense)]
         if self.backend=='attention_graph' and not (self.effective_dense and self.dense_backend=='fa2'):
             for p in self.plans:p.capture('step')
         elif self.backend=='model_graph':self.capture_model()
@@ -127,7 +142,7 @@ class FullQwen2Session:
                 q,k,v=self.project(i,layer.input_layernorm(h),cos,sin)
                 p.q.copy_(q);p.k.copy_(k);p.v.copy_(v)
             with self.scope('model/cache_attention'):
-                if self.effective_dense and self.dense_backend=='fa2':
+                if self.layer_dense[i] and self.dense_backend=='fa2':
                     c=p.cache
                     step_ops.metadata(c._table,c._lengths,p.gpu_ids,p.positions,p.delta,True)
                     page_ops.append_tokens(p.k,p.v,c.k_cache,c.v_cache,c._table,p.gpu_ids,p.positions)
@@ -175,8 +190,8 @@ class FullQwen2Session:
             raise ValueError('one valid CPU token ID required')
         if not self.plans:raise ValueError('prepare first')
         plans=[p._state.plan() for p in self.plans]
-        if self.effective_dense and self.dense_backend=='fa2' and any(
-            logical!=physical for plan in plans for _,logical,physical in plan.updates):
+        if self.dense_backend=='fa2' and any(
+            logical!=physical for plan,dense in zip(plans,self.layer_dense) if dense for _,logical,physical in plan.updates):
             raise ValueError('dense FA2 page layout changed')
         self.input.fill_(token)
         for p,plan in zip(self.plans,plans):p._upload(plan)

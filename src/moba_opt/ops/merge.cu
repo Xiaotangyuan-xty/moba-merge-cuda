@@ -16,6 +16,7 @@
 #include <cuda_bf16.h>
 #include <cuda_fp16.h>
 #include <cstdint>
+#include <climits>
 #include <limits>
 
 namespace moba_opt {
@@ -73,7 +74,8 @@ __global__ void merge_kernel(
     float* __restrict__ lse,
     const int64_t P,
     const int D,
-    const int kpad) {
+    const int kpad,
+    const bool deterministic) {
   constexpr int LPT = DPAD / 32;
   const int lane = threadIdx.x & 31;
   const int64_t gwarp = ((int64_t)blockIdx.x * blockDim.x + threadIdx.x) >> 5;
@@ -89,8 +91,22 @@ __global__ void merge_kernel(
     // lane j (< cnt, cnt <= kpad <= 8 <= 32) carries the j-th remote contribution
     float l_j = -INFINITY;
     int slot_j = 0;
+    if (deterministic) {
+      // Atomic tickets may arrive in any order. Canonicalize the at-most-eight
+      // original contribution indices before BOTH weight and output reduction.
+      // Padded lanes sort to the end and are never used as remote addresses.
+      int index = lane < cnt ? slots[row * kpad + lane] : INT_MAX;
+      for (int width = 2; width <= kpad; width <<= 1) {
+        for (int distance = width >> 1; distance > 0; distance >>= 1) {
+          const int other = __shfl_xor_sync(0xffffffffu, index, distance);
+          const bool low = ((lane & width) == 0) == ((lane & distance) == 0);
+          index = low ? min(index, other) : max(index, other);
+        }
+      }
+      if (lane < cnt) slot_j = index;
+    }
     if (lane < cnt) {
-      slot_j = slots[row * kpad + lane];
+      if (!deterministic) slot_j = slots[row * kpad + lane];
       l_j = remote_lse[slot_j];
     }
 
@@ -148,21 +164,21 @@ void launch_merge(
     const scalar_t* remote_out, const float* remote_lse,
     const int* slots, const int* counts,
     scalar_t* out, float* lse,
-    int64_t P, int64_t D, int kpad, cudaStream_t stream) {
+    int64_t P, int64_t D, int kpad, cudaStream_t stream, bool deterministic) {
   const int threads = kWarpsPerBlock * 32;
   const int64_t blocks = (P + kWarpsPerBlock - 1) / kWarpsPerBlock;
   if (D <= 32) {
     merge_kernel<scalar_t, 32><<<blocks, threads, 0, stream>>>(
-        self_out, self_lse, remote_out, remote_lse, slots, counts, out, lse, P, D, kpad);
+        self_out, self_lse, remote_out, remote_lse, slots, counts, out, lse, P, D, kpad, deterministic);
   } else if (D <= 64) {
     merge_kernel<scalar_t, 64><<<blocks, threads, 0, stream>>>(
-        self_out, self_lse, remote_out, remote_lse, slots, counts, out, lse, P, D, kpad);
+        self_out, self_lse, remote_out, remote_lse, slots, counts, out, lse, P, D, kpad, deterministic);
   } else if (D <= 128) {
     merge_kernel<scalar_t, 128><<<blocks, threads, 0, stream>>>(
-        self_out, self_lse, remote_out, remote_lse, slots, counts, out, lse, P, D, kpad);
+        self_out, self_lse, remote_out, remote_lse, slots, counts, out, lse, P, D, kpad, deterministic);
   } else if (D <= 256) {
     merge_kernel<scalar_t, 256><<<blocks, threads, 0, stream>>>(
-        self_out, self_lse, remote_out, remote_lse, slots, counts, out, lse, P, D, kpad);
+        self_out, self_lse, remote_out, remote_lse, slots, counts, out, lse, P, D, kpad, deterministic);
   } else {
     TORCH_CHECK(false, "head_dim exceeds 256");
   }
@@ -175,7 +191,8 @@ std::vector<torch::Tensor> merge_forward_cuda(
     torch::Tensor remote_lse,
     torch::Tensor mapping,
     int64_t kmax,
-    bool check_capacity) {
+    bool check_capacity,
+    bool deterministic) {
   TORCH_CHECK(self_out.is_cuda() && self_out.dim() == 3, "self_out must be CUDA [T,H,D]");
   const at::cuda::CUDAGuard device_guard(self_out.device());
   const auto st = self_out.scalar_type();
@@ -250,21 +267,21 @@ std::vector<torch::Tensor> merge_forward_cuda(
   const int* cp = counts.data_ptr<int>();
   if (st == at::kFloat) {
     launch_merge<float>(self_out_c.data_ptr<float>(), sl, remote_out_c.data_ptr<float>(), rl,
-                        sp, cp, out.data_ptr<float>(), lse.data_ptr<float>(), P, D, kpad, stream);
+                        sp, cp, out.data_ptr<float>(), lse.data_ptr<float>(), P, D, kpad, stream, deterministic);
   } else if (st == at::kBFloat16) {
     launch_merge<__nv_bfloat16>(
         reinterpret_cast<__nv_bfloat16*>(self_out_c.data_ptr<at::BFloat16>()), sl,
         reinterpret_cast<__nv_bfloat16*>(remote_out_c.data_ptr<at::BFloat16>()), rl,
         sp, cp,
         reinterpret_cast<__nv_bfloat16*>(out.data_ptr<at::BFloat16>()), lse.data_ptr<float>(),
-        P, D, kpad, stream);
+        P, D, kpad, stream, deterministic);
   } else {
     launch_merge<__half>(
         reinterpret_cast<__half*>(self_out_c.data_ptr<at::Half>()), sl,
         reinterpret_cast<__half*>(remote_out_c.data_ptr<at::Half>()), rl,
         sp, cp,
         reinterpret_cast<__half*>(out.data_ptr<at::Half>()), lse.data_ptr<float>(),
-        P, D, kpad, stream);
+        P, D, kpad, stream, deterministic);
   }
   C10_CUDA_KERNEL_LAUNCH_CHECK();
   return {out, lse};

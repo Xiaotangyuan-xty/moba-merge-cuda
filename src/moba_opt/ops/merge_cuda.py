@@ -29,7 +29,7 @@ def ext():
     return _EXT
 
 
-def merge_forward_cuda(self_out, self_lse, remote_out, remote_lse, mapping, kmax=None, check_capacity=True):
+def merge_forward_cuda(self_out, self_lse, remote_out, remote_lse, mapping, kmax=None, check_capacity=True, deterministic=False):
     """Same contract as merge_triton.merge_forward (atomic build included).
 
     self_out [T,H,D] (fp32/bf16/fp16, CUDA); self_lse [T,H] fp32;
@@ -37,6 +37,8 @@ def merge_forward_cuda(self_out, self_lse, remote_out, remote_lse, mapping, kmax
     check_capacity=True makes the slot build raise on capacity overflow
     (one small device->host sync per call). Returns (O, LSE fp32).
     """
+    if not isinstance(deterministic,bool):
+        raise ValueError('deterministic must be bool')
     if mapping.dim() != 1 or mapping.dtype not in (torch.int32, torch.int64):
         raise ValueError("mapping must be a 1D int32/int64 tensor")
     if kmax is None:
@@ -53,5 +55,6 @@ def merge_forward_cuda(self_out, self_lse, remote_out, remote_lse, mapping, kmax
         mapping.to(torch.int64).reshape(-1),
         int(kmax),
         bool(check_capacity),
+        deterministic,
     )
     return out, lse

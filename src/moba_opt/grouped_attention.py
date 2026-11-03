@@ -11,7 +11,7 @@ from moba.moba_efficient import calc_chunks, moba_attn_varlen
 
 from .api import register
 from .baseline_adapter import _validate
-from .mixed_attention import OptMixedAttention, MERGE_BACKEND_CUDA
+from .mixed_attention import OptMixedAttention, MERGE_BACKEND_CUDA, MERGE_BACKEND_CUDA_SORTED
 
 ROUTE_HOOK = None
 
@@ -32,6 +32,11 @@ def opt_gqa_cuda(q, k, v, cu_seqlens, max_seqlen, config):
     hkv = k.shape[1]
     groups = hq // hkv
     chunk_size = int(config["chunk_size"])
+    precision=config.get('route_precision','upstream')
+    deterministic=config.get('deterministic_merge',False)
+    stable=config.get('stable_routes',False)
+    if precision not in ('upstream','fp32'):raise ValueError('route_precision')
+    if not isinstance(deterministic,bool) or not isinstance(stable,bool):raise ValueError('routing flags must be bool')
     cu_chunk, filtered, num_chunks, chunk_batch = calc_chunks(cu_seqlens, chunk_size)
     remote_k = min(int(config["topk"]) - 1, num_chunks)
     if remote_k == 0:
@@ -43,7 +48,8 @@ def opt_gqa_cuda(q, k, v, cu_seqlens, max_seqlen, config):
     kv = torch.stack((k, v), dim=1)
     indices = cu_chunk[filtered, None] + torch.arange(chunk_size, device=q.device)[None, :]
     filtered_kv = kv.index_select(0, indices.reshape(-1))
-    means = filtered_kv[:, 0].reshape(num_chunks, chunk_size, hkv, dim).mean(1).float()
+    keys=filtered_kv[:, 0].reshape(num_chunks, chunk_size, hkv, dim)
+    means = keys.float().mean(1) if precision=='fp32' else keys.mean(1).float()
     # Match upstream's head-wise dot-product layout; this is F representatives,
     # not T token K/V, and no V replication occurs.
     gate = torch.einsum("nhd,shd->nhs", means.repeat_interleave(groups, dim=1), q.float())
@@ -52,7 +58,16 @@ def opt_gqa_cuda(q, k, v, cu_seqlens, max_seqlen, config):
     seq_ends = cu_seqlens[chunk_batch[filtered] + 1]
     invalid = (positions[None, :] < ends[:, None]) | (positions[None, :] >= seq_ends[:, None])
     gate.masked_fill_(invalid[:, None, :], -float("inf"))
-    top = torch.topk(gate, remote_k, dim=0, sorted=False).indices
+    if stable:
+        # argmax explicitly returns the first (lowest chunk) on exact ties.
+        # Repeated reductions avoid materializing a full int64 argsort matrix.
+        remaining=gate.clone();chosen=[]
+        for _ in range(remote_k):
+            index=remaining.argmax(dim=0,keepdim=True)
+            chosen.append(index)
+            remaining.scatter_(0,index,-float('inf'))
+        top=torch.cat(chosen,dim=0)
+    else:top = torch.topk(gate, remote_k, dim=0, sorted=False).indices
     selected = torch.zeros_like(gate, dtype=torch.bool).scatter_(0, top, True) & ~gate.isinf()
     if ROUTE_HOOK is not None:
         ROUTE_HOOK(cu_chunk=cu_chunk, filtered_chunk_indices=filtered,
@@ -79,7 +94,8 @@ def opt_gqa_cuda(q, k, v, cu_seqlens, max_seqlen, config):
     remote_max = int(active_counts.max().item())
     return OptMixedAttention.apply(
         q, k, v, cu_chunk, remote_q, remote_kv, cu_q, cu_kv,
-        max_seqlen, chunk_size, mapping, remote_k, MERGE_BACKEND_CUDA, remote_max,
+        max_seqlen, chunk_size, mapping, remote_k,
+        MERGE_BACKEND_CUDA_SORTED if deterministic else MERGE_BACKEND_CUDA, remote_max,
     )
 
 
