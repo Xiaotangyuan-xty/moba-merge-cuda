@@ -41,6 +41,7 @@ def summarize(directory,recipe,recipe_sha,pattern):
     records=[]
     for path in sorted(Path(directory).glob(pattern)):
         data=json.loads(path.read_text())
+        if not isinstance(data,dict):continue
         if data.get('stage') not in ('calibrate','evaluate','latency') or 'recipe_sha256' not in data:continue
         if data['status']!='ok' or data['dirty'] or data['recipe_sha256']!=recipe_sha:raise ValueError('invalid source provenance')
         records.append((path,data))
@@ -50,6 +51,17 @@ def summarize(directory,recipe,recipe_sha,pattern):
         cc=[x for x in rr if x[1]['stage']=='calibrate'];ee=[x for x in rr if x[1]['stage']=='evaluate'];tt=[x for x in rr if x[1]['stage']=='latency']
         if len(cc)!=1 or len(ee)!=1 or len(tt)!=recipe['latency']['runs']:raise ValueError('incomplete experiment stages')
         cp,cal=cc[0];n=len(cal['result']['ranking']['layer_rank']);order=cal['result']['ranking']['layer_rank']
+        if 'parent_calibration_sha256' in cal:
+            parent_path=next((f for f in Path(directory).glob('*.json') if hashlib.sha256(f.read_bytes()).hexdigest()==cal['parent_calibration_sha256']),None)
+            if parent_path is None:raise ValueError('missing parent calibration evidence')
+            parent=json.loads(parent_path.read_text())
+            if parent['recipe_sha256']!=recipe['parent_recipe_sha256'] or parent['model_key']!=key or parent['status']!='ok' or parent['dirty']:
+                raise ValueError('invalid parent calibration')
+            for field in ('ranking','dense_reference'):
+                if parent['result'][field]!=cal['result'][field]:raise ValueError('changed reused train/valid evidence')
+            inherited={c['dense_layer_count']:c for c in cal['result']['candidates']}
+            for previous in parent['result']['candidates']:
+                if any(inherited[previous['dense_layer_count']][k]!=v for k,v in previous.items()):raise ValueError('changed reused candidate')
         if set(order)!=set(range(n)):raise ValueError('invalid layer rank')
         for c in cal['result']['candidates']:
             if c['dense_layers']!=sorted(order[:c['dense_layer_count']]):raise ValueError('non-nested calibration family')
@@ -72,9 +84,16 @@ def summarize(directory,recipe,recipe_sha,pattern):
         expected_windows={(w['length'],w['end']):w for w in windows(recipe,'test')}
         target_hashes={}
         bases={(r['length'],r['end']):r for r in rows if r['method']=='dense'}
+        def expected_mask(method,length):
+            if method=='dense':return list(range(n))
+            if method=='old_2k':return recipe['models'][key]['old_policy']['dense_layers']
+            if method=='shared':return cal['result']['shared_policy']['dense_layers']
+            return cal['result']['per_length_policies'][str(length)]['dense_layers']
         for r in rows:
             w=expected_windows[r['length'],r['end']]
             if any(r[k]!=v for k,v in w.items()):raise ValueError('unexpected held-out window')
+            dense=expected_mask(r['method'],r['length'])
+            if r['dense_layer_count']!=len(dense) or r['sparse_layer_count']!=n-len(dense):raise ValueError('quality policy mismatch')
             hashes=(r['tail_target_sha256'],r['continuation_target_sha256'])
             if target_hashes.setdefault(r['end'],hashes)!=hashes:raise ValueError('targets are not end-aligned')
             base=bases[r['length'],r['end']]
@@ -85,6 +104,8 @@ def summarize(directory,recipe,recipe_sha,pattern):
         for r in recomputed:aggregates.append(dict(model=key,**r))
         for tp,td in tt:
             for r in td['result']['rows']:
+                dense=expected_mask(r['method'],r['length'])
+                if r['dense_layers']!=dense or r['sparse_layer_count']!=n-len(dense):raise ValueError('timing policy mismatch')
                 source=next(x for x in rows if x['length']==r['length'] and x['end']==r['end'] and x['method']==r['method'])
                 if source['input_sha256']!=r['input_sha256']:raise ValueError('timing input differs from quality input')
             perf.extend(timing(td,recipe,tp.name))

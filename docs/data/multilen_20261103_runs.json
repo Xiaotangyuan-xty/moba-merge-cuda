@@ -1,0 +1,182 @@
+[
+  {
+    "tag": "regression_01",
+    "started_utc": "2026-11-03T04:21:22.087696+00:00",
+    "finished_utc": "2026-11-03T04:23:29.211058+00:00",
+    "wall_seconds": 127.12328306399286,
+    "peak_device_mib": 3093,
+    "reason": "completed",
+    "returncode": 0,
+    "git_head": "7469e694bf58cbc47d91ca26d21bed2ff21869b6"
+  },
+  {
+    "tag": "calibrate_05_01",
+    "started_utc": "2026-11-03T04:23:29.361534+00:00",
+    "finished_utc": "2026-11-03T04:25:03.821064+00:00",
+    "wall_seconds": 94.45944545790553,
+    "peak_device_mib": 3689,
+    "reason": "completed",
+    "returncode": 0,
+    "git_head": "7469e694bf58cbc47d91ca26d21bed2ff21869b6"
+  },
+  {
+    "tag": "calibrate_15_01",
+    "started_utc": "2026-11-03T04:25:03.970654+00:00",
+    "finished_utc": "2026-11-03T04:27:43.857747+00:00",
+    "wall_seconds": 159.88700344786048,
+    "peak_device_mib": 6695,
+    "reason": "completed",
+    "returncode": 0,
+    "git_head": "7469e694bf58cbc47d91ca26d21bed2ff21869b6"
+  },
+  {
+    "tag": "evaluate_05_01",
+    "started_utc": "2026-11-03T04:27:44.010491+00:00",
+    "finished_utc": "2026-11-03T04:28:30.755221+00:00",
+    "wall_seconds": 46.74464272148907,
+    "peak_device_mib": 3507,
+    "reason": "completed",
+    "returncode": 0,
+    "git_head": "7469e694bf58cbc47d91ca26d21bed2ff21869b6"
+  },
+  {
+    "tag": "evaluate_15_01",
+    "started_utc": "2026-11-03T04:28:30.904188+00:00",
+    "finished_utc": "2026-11-03T04:29:53.623897+00:00",
+    "wall_seconds": 82.71966709941626,
+    "peak_device_mib": 6475,
+    "reason": "completed",
+    "returncode": 0,
+    "git_head": "7469e694bf58cbc47d91ca26d21bed2ff21869b6"
+  },
+  {
+    "tag": "latency_05_a",
+    "started_utc": "2026-11-03T04:29:53.758834+00:00",
+    "finished_utc": "2026-11-03T04:30:11.154836+00:00",
+    "wall_seconds": 17.395917600020766,
+    "peak_device_mib": 3173,
+    "reason": "completed",
+    "returncode": 0,
+    "git_head": "7469e694bf58cbc47d91ca26d21bed2ff21869b6"
+  },
+  {
+    "tag": "latency_15_a",
+    "started_utc": "2026-11-03T04:30:11.300205+00:00",
+    "finished_utc": "2026-11-03T04:30:36.271187+00:00",
+    "wall_seconds": 24.970898274332285,
+    "peak_device_mib": 6531,
+    "reason": "completed",
+    "returncode": 0,
+    "git_head": "7469e694bf58cbc47d91ca26d21bed2ff21869b6"
+  },
+  {
+    "tag": "latency_05_b",
+    "started_utc": "2026-11-03T04:30:36.419851+00:00",
+    "finished_utc": "2026-11-03T04:30:52.774839+00:00",
+    "wall_seconds": 16.354902176186442,
+    "peak_device_mib": 3093,
+    "reason": "completed",
+    "returncode": 0,
+    "git_head": "7469e694bf58cbc47d91ca26d21bed2ff21869b6"
+  },
+  {
+    "tag": "latency_15_b",
+    "started_utc": "2026-11-03T04:30:52.919802+00:00",
+    "finished_utc": "2026-11-03T04:31:17.896747+00:00",
+    "wall_seconds": 24.976862352341413,
+    "peak_device_mib": 6531,
+    "reason": "completed",
+    "returncode": 0,
+    "git_head": "7469e694bf58cbc47d91ca26d21bed2ff21869b6"
+  },
+  {
+    "tag": "regression_02",
+    "started_utc": "2026-11-03T04:37:58.384750+00:00",
+    "finished_utc": "2026-11-03T04:38:23.338476+00:00",
+    "wall_seconds": 24.953620731830597,
+    "peak_device_mib": 3093,
+    "reason": "completed",
+    "returncode": 0,
+    "git_head": "d9c83dba30f65d8d75cec66b59495e7403b0726c"
+  },
+  {
+    "tag": "calibrate_05_02",
+    "started_utc": "2026-11-03T04:38:23.487475+00:00",
+    "finished_utc": "2026-11-03T04:39:09.041974+00:00",
+    "wall_seconds": 45.55441060103476,
+    "peak_device_mib": 2941,
+    "reason": "completed",
+    "returncode": 0,
+    "git_head": "d9c83dba30f65d8d75cec66b59495e7403b0726c"
+  },
+  {
+    "tag": "calibrate_15_02",
+    "started_utc": "2026-11-03T04:39:09.195826+00:00",
+    "finished_utc": "2026-11-03T04:40:40.578460+00:00",
+    "wall_seconds": 91.38252363167703,
+    "peak_device_mib": 6275,
+    "reason": "completed",
+    "returncode": 0,
+    "git_head": "d9c83dba30f65d8d75cec66b59495e7403b0726c"
+  },
+  {
+    "tag": "evaluate_05_02",
+    "started_utc": "2026-11-03T04:40:40.737826+00:00",
+    "finished_utc": "2026-11-03T04:41:27.507714+00:00",
+    "wall_seconds": 46.76980585604906,
+    "peak_device_mib": 3507,
+    "reason": "completed",
+    "returncode": 0,
+    "git_head": "d9c83dba30f65d8d75cec66b59495e7403b0726c"
+  },
+  {
+    "tag": "evaluate_15_02",
+    "started_utc": "2026-11-03T04:41:27.665698+00:00",
+    "finished_utc": "2026-11-03T04:42:50.378280+00:00",
+    "wall_seconds": 82.71249970048666,
+    "peak_device_mib": 6515,
+    "reason": "completed",
+    "returncode": 0,
+    "git_head": "d9c83dba30f65d8d75cec66b59495e7403b0726c"
+  },
+  {
+    "tag": "latency_05_c",
+    "started_utc": "2026-11-03T04:42:50.531768+00:00",
+    "finished_utc": "2026-11-03T04:43:07.934381+00:00",
+    "wall_seconds": 17.40253134444356,
+    "peak_device_mib": 3171,
+    "reason": "completed",
+    "returncode": 0,
+    "git_head": "d9c83dba30f65d8d75cec66b59495e7403b0726c"
+  },
+  {
+    "tag": "latency_15_c",
+    "started_utc": "2026-11-03T04:43:08.090629+00:00",
+    "finished_utc": "2026-11-03T04:43:33.110310+00:00",
+    "wall_seconds": 25.019599391147494,
+    "peak_device_mib": 6611,
+    "reason": "completed",
+    "returncode": 0,
+    "git_head": "d9c83dba30f65d8d75cec66b59495e7403b0726c"
+  },
+  {
+    "tag": "latency_05_d",
+    "started_utc": "2026-11-03T04:43:33.268454+00:00",
+    "finished_utc": "2026-11-03T04:43:49.634847+00:00",
+    "wall_seconds": 16.366303481161594,
+    "peak_device_mib": 3195,
+    "reason": "completed",
+    "returncode": 0,
+    "git_head": "d9c83dba30f65d8d75cec66b59495e7403b0726c"
+  },
+  {
+    "tag": "latency_15_d",
+    "started_utc": "2026-11-03T04:43:49.790716+00:00",
+    "finished_utc": "2026-11-03T04:44:13.816656+00:00",
+    "wall_seconds": 24.025849655270576,
+    "peak_device_mib": 6611,
+    "reason": "completed",
+    "returncode": 0,
+    "git_head": "d9c83dba30f65d8d75cec66b59495e7403b0726c"
+  }
+]

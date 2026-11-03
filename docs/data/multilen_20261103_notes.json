@@ -1,0 +1,29 @@
+{
+  "tested_commit": "d9c83dba30f65d8d75cec66b59495e7403b0726c",
+  "tests": {
+    "passed": 554,
+    "skipped": 2,
+    "failed": 0,
+    "seconds": 23.346
+  },
+  "resources": {
+    "physical_gpu": 1,
+    "process_wall_seconds": 968.8197665866464,
+    "limit_seconds": 1200,
+    "monitor_peak_mib": 6695,
+    "monitor_limit_mib": 8192,
+    "allocator_gib": 7,
+    "threads": 2,
+    "gpu0_gpu2_jobs": 0
+  },
+  "protocol_audit": {
+    "both_models_frozen_before_test_each_phase": true,
+    "thresholds_unchanged": true,
+    "refinement_uses_only_valid_scores": true,
+    "second_test_cohort_disjoint": true
+  },
+  "training": {
+    "executed": false,
+    "reason": "User requested calibration then consideration;distillation readiness evaluated separately"
+  }
+}

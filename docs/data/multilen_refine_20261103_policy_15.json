@@ -1,0 +1,62 @@
+{
+  "status": "empirically_validated_shared_policy",
+  "model": "Qwen/Qwen2.5-1.5B",
+  "revision": "8faed761d45a263340a0528343f099c05c9a4323",
+  "model_config_sha256": "0e8c8aa86468aba09c9d32157ff4bc2301c7e6c50e4398960425b2ea71e66f77",
+  "calibration_sha256": "542f4e2d37155e650dd90df51db05e2d125eae804af534dad257250b3fbdf20e",
+  "recipe_sha256": "a53073aab8cfb70f5b809f80478274dc3d0a95df2b79271e03e034665e8b1652",
+  "dense_layers": [
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    19,
+    20,
+    21,
+    22,
+    23,
+    24,
+    25,
+    26
+  ],
+  "sparse_layers": [
+    0,
+    1,
+    18,
+    27
+  ],
+  "options": {
+    "mode": "moba",
+    "chunk": 128,
+    "topk": 4,
+    "deterministic_merge": true,
+    "stable_routes": true,
+    "route_precision": "fp32"
+  },
+  "tested_prefix_lengths": [
+    2048,
+    8192,
+    16384
+  ],
+  "tested_max_continuation": 256,
+  "batch": 1,
+  "weights_trained": false,
+  "limits": [
+    "quality budget is empirical at fixed WikiText windows",
+    "no guarantee for all prompts or intermediate lengths",
+    "no general speedup over dense Graph",
+    "fixed mask throughout a request;CPU management remains outside Graph"
+  ]
+}
