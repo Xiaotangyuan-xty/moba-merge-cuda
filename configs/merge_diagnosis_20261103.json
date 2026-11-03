@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "pilot_recipe": "configs/distill_pilot_20261103.json",
+  "training_result": "docs/data/distill_pilot_20261103_train_01.json",
+  "diagnostic_checkpoints": [25, 100],
+  "lengths": [2048, 8192, 16384],
+  "tail_targets": 512,
+  "continuation_targets": 256,
+  "target_boundaries": {
+    "valid": [32768, 65536, 98304, 131072, 163840, 196608, 229376, 262144]
+  },
+  "diagnostic_boundaries": [196608, 229376],
+  "logit_positions": 64,
+  "heldout_delta_nll": 0.05,
+  "expanded_checkpoints": [0, 25, 50, 75, 100],
+  "no_new_test_evaluation": true,
+  "no_training": true,
+  "resource": {
+    "approved_physical_gpus": [0, 1],
+    "preferred_gpu": 1,
+    "process_limit_seconds": 1200,
+    "device_limit_mib": 8192,
+    "allocator_gib": 7,
+    "cpu_threads": 2
+  }
+}
