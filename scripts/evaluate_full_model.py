@@ -106,9 +106,31 @@ def validate(model,tokens):
             rows.append(dict(method=name,checks=checks,capture_preserves_visible_lengths=True))
         finally:s.close()
         del s;gc.collect();torch.cuda.empty_cache()
-    return dict(scope='pretrained full model; fixed teacher-forced dense/all-selected comparisons',
+    sparse_graph=[]
+    for packed in (False,True):
+        suffix='_packed' if packed else ''
+        eager=make_session(model,'moba_k4_eager'+suffix,1060)
+        graph=make_session(model,'moba_k4_modelgraph'+suffix,1060)
+        try:
+            prefix=torch.tensor([tokens[:1023]],device='cuda')
+            initial=dense_metrics(prefill(eager,prefix),prefill(graph,prefix));assert_dense(initial)
+            eager.prepare();graph.prepare()
+            assert all(c.lengths==(1023,) for c in graph.caches)
+            checks=[initial]
+            # Cross both a page and a chunk boundary in the actual sparse path.
+            for token in tokens[1023:1043]:
+                r=dense_metrics(eager.step(token),graph.step(token));assert_dense(r);checks.append(r)
+                assert all(torch.equal(a.selected,b.selected) for a,b in zip(eager.plans,graph.plans))
+                assert [c.lengths for c in eager.caches]==[c.lengths for c in graph.caches]
+            sparse_graph.append(dict(packed_qkv=packed,prefix=1023,steps=20,checks=checks,
+                                     selected_blocks_equal=True,capture_preserves_visible_lengths=True))
+            print(json.dumps({'sparse_graph_packed':packed,'max_relative_l2':max(r['relative_l2'] for r in checks)}),flush=True)
+        finally:eager.close();graph.close()
+        del eager,graph;gc.collect();torch.cuda.empty_cache()
+    return dict(scope='pretrained full model; fixed teacher-forced dense/all-selected and sparse Graph comparisons',
                 primary_reference='native HF FA2',native_sdpa_vs_fa2=envelope,
-                tolerance=dict(relative_l2=0.02,kl=0.002,max_abs=0.5),prefix=128,steps=12,methods=rows)
+                tolerance=dict(relative_l2=0.02,kl=0.002,max_abs=0.5),prefix=128,steps=12,methods=rows,
+                sparse_graph=sparse_graph)
 
 
 def head_nll(model,h,ids):
