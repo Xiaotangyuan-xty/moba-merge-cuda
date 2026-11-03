@@ -59,9 +59,9 @@ def long_rows(data,source):
     return out
 
 
-def summarize(directory):
+def summarize(directory,pattern='stable_quality_20261103_*.json'):
     quality=[];timing=[];diagnostics=[];calibrations=[]
-    for path in sorted(Path(directory).glob('*.json')):
+    for path in sorted(Path(directory).glob(pattern)):
         data=json.loads(path.read_text());stage=data.get('stage')
         if stage not in ('evaluate','long','retrieve','stability','calibrate','integration'):continue
         if data['status']!='ok' or data['dirty']:raise ValueError('failed/dirty source')
@@ -92,10 +92,11 @@ def summarize(directory):
 
 
 def main():
-    p=argparse.ArgumentParser();p.add_argument('--input-dir',required=True);p.add_argument('--out-dir',required=True);args=p.parse_args()
+    p=argparse.ArgumentParser();p.add_argument('--input-dir',required=True);p.add_argument('--out-dir',required=True)
+    p.add_argument('--pattern',default='stable_quality_20261103_*.json');args=p.parse_args()
     out=Path(args.out_dir)
     if (out/'summary.json').exists():raise SystemExit('preserve existing summary')
-    quality,timing,summary=summarize(args.input_dir);out.mkdir(exist_ok=True,parents=True)
+    quality,timing,summary=summarize(args.input_dir,args.pattern);out.mkdir(exist_ok=True,parents=True)
     for name,rows in [('quality_all_rows.csv',quality),('timing_all_rows.csv',timing)]:
         with (out/name).open('w',newline='') as f:
             writer=csv.DictWriter(f,fieldnames=list(rows[0]));writer.writeheader();writer.writerows(rows)

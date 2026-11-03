@@ -64,3 +64,12 @@ def test_gpu_guard_queries_only_the_configured_device(monkeypatch):
     monkeypatch.setattr(guard.subprocess,'check_output',query)
     used,pids,_=guard.inspect()
     assert used==0 and not pids and len(calls)==2
+
+
+def test_refinement_keeps_threshold_and_uses_a_disjoint_new_test_cohort():
+    recipe=json.loads((Path(__file__).parents[1]/'configs/multilen_refine_20261103.json').read_text())
+    assert recipe['calibration_delta_nll']==RECIPE['calibration_delta_nll']
+    assert recipe['target_boundaries']['valid']==RECIPE['target_boundaries']['valid']
+    assert min(w['start'] for w in windows(recipe,'test'))>=131072
+    bad=copy.deepcopy(recipe);bad['target_boundaries']['test']=RECIPE['target_boundaries']['test']
+    with pytest.raises(ValueError,match='overlaps'):windows(bad,'test')

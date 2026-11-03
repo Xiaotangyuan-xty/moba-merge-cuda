@@ -4,6 +4,7 @@ GPU1 only through the batch guard. No training, new dependencies or downloads.
 One shared static layer policy is primary; length-specific policies secondary.
 """
 import argparse
+import copy
 import hashlib
 import json
 import math
@@ -87,13 +88,20 @@ def rank(model,tokens,recipe):
     return dict(rows=rows,per_length_errors=per_length,worst_length_errors=worst,layer_rank=order)
 
 
-def calibrate(model,train,valid,recipe):
-    ranking=rank(model,train,recipe);order=ranking['layer_rank'];n=len(order)
-    reference=[]
-    for w in windows(recipe,'valid'):
-        r=score(model,valid,w,recipe,list(range(n)));reference.append(r);cleanup()
+def calibrate(model,train,valid,recipe,parent=None):
+    ranking=rank(model,train,recipe) if parent is None else copy.deepcopy(parent['ranking'])
+    order=ranking['layer_rank'];n=len(order)
+    reference=[] if parent is None else copy.deepcopy(parent['dense_reference'])
+    if parent is None:
+        for w in windows(recipe,'valid'):
+            r=score(model,valid,w,recipe,list(range(n)));reference.append(r);cleanup()
     bases={(r['length'],r['end']):r for r in reference};candidates=[]
-    for count in sorted({round(n*f) for f in recipe['dense_fractions']}):
+    prior={} if parent is None else {c['dense_layer_count']:c for c in parent['candidates']}
+    budgets=recipe.get('dense_counts_by_layers',{}).get(str(n),sorted({round(n*f) for f in recipe['dense_fractions']}))
+    for count in budgets:
+        if count in prior:
+            c=copy.deepcopy(prior[count]);c['reused_parent_candidate']=True;candidates.append(c)
+            continue
         dense=sorted(order[:count]);rows=[]
         for w in windows(recipe,'valid'):
             base=bases[w['length'],w['end']]
@@ -185,11 +193,17 @@ def main():
     p=argparse.ArgumentParser();p.add_argument('--model',required=True);p.add_argument('--model-key',choices=['0.5B','1.5B'],required=True)
     p.add_argument('--data-dir',required=True);p.add_argument('--recipe',default='configs/multilen_20261103.json')
     p.add_argument('--stage',choices=['calibrate','evaluate','latency'],required=True);p.add_argument('--calibration');p.add_argument('--out',required=True)
+    p.add_argument('--parent-calibration')
     args=p.parse_args();out=Path(args.out)
     if out.exists():raise SystemExit('Preserve existing evidence')
     require_gpu1();recipe=json.loads(Path(args.recipe).read_text());config_sha=digest(Path(args.model)/'config.json')
     if config_sha!=recipe['models'][args.model_key]['config_sha256']:raise ValueError('model configuration mismatch')
-    frozen=None
+    frozen=None;parent=None
+    if args.parent_calibration:
+        cal=json.loads(Path(args.parent_calibration).read_text())
+        if args.stage!='calibrate' or cal['stage']!='calibrate' or cal['status']!='ok' or cal['dirty'] or cal['recipe_sha256']!=recipe.get('parent_recipe_sha256') or cal['model_key']!=args.model_key or cal['model_config_sha256']!=config_sha:
+            raise ValueError('parent calibration provenance mismatch')
+        parent=cal['result']
     if args.stage!='calibrate':
         if not args.calibration:raise ValueError('frozen calibration required')
         cal=json.loads(Path(args.calibration).read_text())
@@ -212,8 +226,9 @@ def main():
         dirty=bool(subprocess.check_output(['git','status','--porcelain'],text=True).strip()),dtype='bf16',batch=1,torch=torch.__version__,
         gpu=torch.cuda.get_device_name(),tf32=False,bf16_reduced_precision_reduction=torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction)
     if args.calibration:record['calibration_sha256']=digest(args.calibration)
+    if args.parent_calibration:record['parent_calibration_sha256']=digest(args.parent_calibration)
     with torch.inference_mode():
-        if args.stage=='calibrate':result=calibrate(model,data['train'],data['valid'],recipe)
+        if args.stage=='calibrate':result=calibrate(model,data['train'],data['valid'],recipe,parent)
         elif args.stage=='evaluate':result=evaluate(model,data['test'],frozen,recipe,args.model_key)
         else:result=latency(model,data['test'],frozen,recipe,args.model_key)
     record.update(status='ok',result=result);out.parent.mkdir(parents=True,exist_ok=True);out.write_text(json.dumps(record,indent=2)+'\n')

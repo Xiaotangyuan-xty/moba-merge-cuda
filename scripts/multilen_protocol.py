@@ -13,13 +13,15 @@ def windows(recipe,split):
                 raise ValueError('invalid window')
             result.append(dict(split=split,length=length,end=end,start=end-length,
                 tail_start=end-recipe['tail_targets'],continuation_end=end+recipe['continuation_targets']))
+            if split=='test' and any(end-length<hi and end+recipe['continuation_targets']>lo for lo,hi in recipe.get('excluded_test_intervals',[])):
+                raise ValueError('test window overlaps previously used data')
     return result
 
 
 def select(candidates,recipe,num_layers):
     expected={(w['length'],w['end']) for w in windows(recipe,'valid')}
     counts=[r['dense_layer_count'] for r in candidates]
-    budgets=sorted({round(num_layers*f) for f in recipe['dense_fractions']})
+    budgets=recipe.get('dense_counts_by_layers',{}).get(str(num_layers),sorted({round(num_layers*f) for f in recipe['dense_fractions']}))
     if counts!=budgets:raise ValueError('incomplete candidate budgets')
     for candidate in candidates:
         rows=candidate['rows'];keys=[(r['length'],r['end']) for r in rows]
