@@ -26,9 +26,9 @@ BATCH_ID=os.environ.get("MOBA_BATCH_ID", "coverage_20261101")
 def inspect():
     if not GPU_UUID:
         raise RuntimeError("Set MOBA_COVERAGE_GPU_UUID in private env.local.sh after approval")
-    gpu_text=subprocess.check_output(["nvidia-smi","--query-gpu=index,uuid,name,memory.used,memory.total",
+    gpu_text=subprocess.check_output(["nvidia-smi","--id="+GPU_UUID,"--query-gpu=index,uuid,name,memory.used,memory.total",
                                       "--format=csv,noheader,nounits"],text=True,timeout=10)
-    proc_text=subprocess.check_output(["nvidia-smi","--query-compute-apps=gpu_uuid,pid,process_name,used_memory",
+    proc_text=subprocess.check_output(["nvidia-smi","--id="+GPU_UUID,"--query-compute-apps=gpu_uuid,pid,process_name,used_memory",
                                        "--format=csv,noheader,nounits"],text=True,timeout=10)
     devices=[list(map(str.strip,row)) for row in csv.reader(gpu_text.splitlines())]
     target=next((row for row in devices if row[1]==GPU_UUID),None)
