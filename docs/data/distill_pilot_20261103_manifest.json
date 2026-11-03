@@ -1,0 +1,93 @@
+{
+  "scope": "public data only; manifest excludes itself; raw stage records copied byte-for-byte",
+  "files": {
+    "distill_pilot_20261103_adapters.json": {
+      "bytes": 1178,
+      "sha256": "b656539fe041c1583647020b0f7633123bbd19aa827f829247722b6a17c85e63"
+    },
+    "distill_pilot_20261103_cpu_audit.json": {
+      "bytes": 1890,
+      "sha256": "0667dca66e5387bdb3f5976c81f6be1665eaf5dae2921a19cc0984995c171273"
+    },
+    "distill_pilot_20261103_evaluate_01.json": {
+      "bytes": 36744,
+      "sha256": "0afba85b2e31086370c6ff02fa191ed4abb163506f8e93be2a6ee72fe5384210"
+    },
+    "distill_pilot_20261103_last_diagnostic_01.json": {
+      "bytes": 29959,
+      "sha256": "1a9c241d5c8a5f5506a036db11577aa2aba8d19b728e620d4d085d4218fdb092"
+    },
+    "distill_pilot_20261103_latency_a.json": {
+      "bytes": 111089,
+      "sha256": "0ca2a689fb6e3569c74d8b15d81b3cfcc1f7797cd62e9477208c0252a09ceaeb"
+    },
+    "distill_pilot_20261103_latency_b.json": {
+      "bytes": 111089,
+      "sha256": "84320e7365e15902a2f5a885182b3d62b1c4636a80e3deba4bc0edb897d87e15"
+    },
+    "distill_pilot_20261103_merge_gates.csv": {
+      "bytes": 1073,
+      "sha256": "e720b8f4dfc9afb5c440d2c294da4e1bc548cf2ffcf3f3f856f21ad6fc26409b"
+    },
+    "distill_pilot_20261103_preflight_01.json": {
+      "bytes": 5477,
+      "sha256": "1929ef9d66c54009569a56b1452e9a46649b84b7bca2912f73c865ecfecddc85"
+    },
+    "distill_pilot_20261103_quality_diagnostic.csv": {
+      "bytes": 2560,
+      "sha256": "8449ed06f30232ee7cff7c3c1e8ad4d390f8384967937848dbae3320139c7ed6"
+    },
+    "distill_pilot_20261103_quality_diagnostic_windows.csv": {
+      "bytes": 7980,
+      "sha256": "3221a71fc86763b7d4ad45c85e92da8bd256b0c56955a0e414c5edd6a41eaf4e"
+    },
+    "distill_pilot_20261103_quality_primary.csv": {
+      "bytes": 3281,
+      "sha256": "c063e547132b935444bcea19e20c0466190f3590afb2a875cb63c0aaac691fe5"
+    },
+    "distill_pilot_20261103_quality_primary_windows.csv": {
+      "bytes": 10018,
+      "sha256": "8648ddbc5916bc87a367d21548071dd28feb024fca652e39c5260899b75c4b51"
+    },
+    "distill_pilot_20261103_recipe.json": {
+      "bytes": 2847,
+      "sha256": "f8f00537bb2bf0518dc352262345cc7097e3700733aea281badf926d2e8be01a"
+    },
+    "distill_pilot_20261103_release_checks.json": {
+      "bytes": 426,
+      "sha256": "9189b87f156b9686ed510c081ab61cc7e9615ab7c79851e9cf1901fff2bb757a"
+    },
+    "distill_pilot_20261103_resources.json": {
+      "bytes": 3907,
+      "sha256": "9aac40644527aa1d6b33330675d948bb8cc18f63d37c46042d54594a99156e5f"
+    },
+    "distill_pilot_20261103_summary.json": {
+      "bytes": 1647,
+      "sha256": "c2d3fdcfc06f1c5a694a3dacf3f6eb19fbc162320658a8f73136ce05d28815da"
+    },
+    "distill_pilot_20261103_tests.json": {
+      "bytes": 1036,
+      "sha256": "4b388b85663cecdef0ae18f60cfeb09059840fc78921101acf68707ef9132b39"
+    },
+    "distill_pilot_20261103_timing_all_rows.csv": {
+      "bytes": 4973,
+      "sha256": "5026d89b889b98627418d074bc62d2f93accc93562bc871e457d6ed759aa8eeb"
+    },
+    "distill_pilot_20261103_train_01.json": {
+      "bytes": 116414,
+      "sha256": "e898b74863c3c12afcc4dc02dd0e292394b1cfbb6cec117776ffde7e94f38613"
+    },
+    "distill_pilot_20261103_training_updates.csv": {
+      "bytes": 39051,
+      "sha256": "452753da7e0597bd0c5dfaa961b65b20390f0f3b8966bd64e45ff8bbd9c80357"
+    },
+    "distill_pilot_20261103_validation_checkpoints.csv": {
+      "bytes": 134,
+      "sha256": "62087d235e6e84e13684406afc37126da3a023816bdcd6364d5225ba1559152f"
+    },
+    "distill_pilot_20261103_validation_windows.csv": {
+      "bytes": 10272,
+      "sha256": "a77bbf978847b5caff6dcbde87731e8280eb1674cf79a8e54eafe4c97ed37275"
+    }
+  }
+}

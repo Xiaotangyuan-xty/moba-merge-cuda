@@ -1,0 +1,41 @@
+{
+  "published_binaries": false,
+  "optimizer_state_saved": false,
+  "adapters": [
+    {
+      "step": 0,
+      "file": "step_000.safetensors",
+      "sha256": "0478f6d2db931aa1b994786790921e51938ae1207380f162c1bf870c6ef80ab3",
+      "bytes": 4345864,
+      "mac_copy_checksum_verified": true
+    },
+    {
+      "step": 25,
+      "file": "step_025.safetensors",
+      "sha256": "67b6945a0cdda8e7540ea7f91139a386b5687e165d4853da3122876cf98dd8f6",
+      "bytes": 4345864,
+      "mac_copy_checksum_verified": true
+    },
+    {
+      "step": 50,
+      "file": "step_050.safetensors",
+      "sha256": "7736d24f3581b8dd2eaf84c3b6f26a409f3b4794f146ca37bbc93da5a0ecde3d",
+      "bytes": 4345864,
+      "mac_copy_checksum_verified": true
+    },
+    {
+      "step": 75,
+      "file": "step_075.safetensors",
+      "sha256": "3e59a1af7e2e9b720afae1898511193bf0048cf6d09f48eba115e6f12b222dcf",
+      "bytes": 4345864,
+      "mac_copy_checksum_verified": true
+    },
+    {
+      "step": 100,
+      "file": "step_100.safetensors",
+      "sha256": "20e1a2c53b772600020b11b1ef853017861af9bea86e264c57f418999bd667db",
+      "bytes": 4345864,
+      "mac_copy_checksum_verified": true
+    }
+  ]
+}

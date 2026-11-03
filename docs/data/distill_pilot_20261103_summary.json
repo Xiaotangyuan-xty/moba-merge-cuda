@@ -1,0 +1,75 @@
+{
+  "selected_step": 25,
+  "optimizer_updates": 100,
+  "trainable_parameters": 1081344,
+  "base_unchanged": true,
+  "selected_merge_passed": false,
+  "last_merge_passed": false,
+  "verdicts": [
+    {
+      "scope": "primary",
+      "method": "dense",
+      "passed": 6,
+      "windows": 6,
+      "worst_delta_nll": 0.0
+    },
+    {
+      "scope": "primary",
+      "method": "untrained",
+      "passed": 0,
+      "windows": 6,
+      "worst_delta_nll": 0.09608682416472902
+    },
+    {
+      "scope": "primary",
+      "method": "selected_unmerged",
+      "passed": 2,
+      "windows": 6,
+      "worst_delta_nll": 0.0844553743689005
+    },
+    {
+      "scope": "primary",
+      "method": "selected_merged",
+      "passed": 2,
+      "windows": 6,
+      "worst_delta_nll": 0.08757090022760394
+    },
+    {
+      "scope": "primary",
+      "method": "last_merged",
+      "passed": 4,
+      "windows": 6,
+      "worst_delta_nll": 0.0658789850445487
+    },
+    {
+      "scope": "posthoc_diagnostic",
+      "method": "dense",
+      "passed": 6,
+      "windows": 6,
+      "worst_delta_nll": 0.0
+    },
+    {
+      "scope": "posthoc_diagnostic",
+      "method": "untrained",
+      "passed": 0,
+      "windows": 6,
+      "worst_delta_nll": 0.09608682416472902
+    },
+    {
+      "scope": "posthoc_diagnostic",
+      "method": "last_unmerged",
+      "passed": 4,
+      "windows": 6,
+      "worst_delta_nll": 0.06452850329816329
+    },
+    {
+      "scope": "posthoc_diagnostic",
+      "method": "last_merged",
+      "passed": 4,
+      "windows": 6,
+      "worst_delta_nll": 0.0658789850445487
+    }
+  ],
+  "timing_rows": 18,
+  "last_merged_repeat_equal": true
+}

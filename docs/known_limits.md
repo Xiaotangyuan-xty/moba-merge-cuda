@@ -15,7 +15,9 @@ decode 旧阶段相对冻结 cache v1 的 28 配置性能取证见 `decode_perf_
 
 新增独立 train/valid 校准的混合策略与 1.5B 完整模型测试。0.5B/1.5B held-out prefill PPL 分别恢复至12.86/9.78，dense为12.40/9.19；部分测试指标仍未达到校准时的ΔNLL≤0.05目标。2K校准策略的质量预算未泛化到长上下文。0.5B约32K可运行；1.5B仅确认至16K，约32K在7GiB allocator/8GiB设备监控限制下OOM。MLP分块候选因真实模型数值验证失败被撤回。48行长上下文比较不构成普遍快于dense Graph的证据，详见 `stable_quality_20261103.md`。
 
-后续多长度校准见 `multilen_calibration_20261103.md`：2K/8K/16K、跨长度相同目标token、新的test输入窗口、逐窗口质量检查。经valid临界预算细化，固定共享策略保留0.5B的3/24、1.5B的4/28层稀疏，第二批测试的每窗口ΔNLL≤0.05均通过；最差PPL增幅4.07%/0.89%。这是有限语料窗口的经验结果，不保证任意prompt、其他长度或训练后模型；也不是相同50%稀疏率下恢复质量。新策略没有稳定快于dense Graph，蒸馏训练未启动。每张层表在请求内固定，不支持自动中途切换策略。
+后续多长度校准见 `multilen_calibration_20261103.md`：2K/8K/16K、跨长度相同目标token、新的test输入窗口、逐窗口质量检查。经valid临界预算细化，固定共享策略保留0.5B的3/24、1.5B的4/28层稀疏，第二批测试的每窗口ΔNLL≤0.05均通过；最差PPL增幅4.07%/0.89%。这是有限语料窗口的经验结果，不保证任意prompt、其他长度或训练后模型；也不是相同50%稀疏率下恢复质量。新策略没有稳定快于dense Graph。该阶段没有训练；后续受限小试见下文。每张层表在请求内固定，不支持自动中途切换策略。
+
+新增实验性 `examples/qwen2_distillation.py` 提供Qwen2.5-0.5B、batch=1的独立prefill LoRA autograd forward，复用已验证Attention一阶反向；不改变cache/Graph的inference-only契约。100次更新固定12/24层稀疏、Q/K/V/O rank8；“50%”是层数比例，不是总Attention/FLOPs减半。2K/8K训练、2K/8K/16K新窗口评估，valid选25步未合并adapter仅2/6窗口通过ΔNLL≤0.05，100步未合并事后诊断为4/6，未改变选点；两者的BF16合并门槛均失败，合并版仅诊断，未合并版更慢。没有完全恢复质量、稳定收敛、可部署加速或1.5B训练结论。Adapter保存但没有optimizer状态，不能精确恢复Adam轨迹。完整失败记录、单seed/有限监督与资源边界见 `distill_pilot_20261103.md`。
 
 前一完整模型阶段质量仅评估 WikiText-2 tokenized test 的前 4×2048-token 块（8188 个目标）、128 个 continuation 目标与六个 synthetic passkey。该阶段正式 36 行延迟没有证明真正稀疏路径优于所测 dense Graph。相对 HF eager 的约 4.3–4.6× 是 dense Graph/集成收益，不是稀疏算法或完整请求收益。packed QKV 仅为 opt-in，数值差异接近短用例门槛；默认旧 sparse prefill 不保证跨运行逐位复现。早期 Triton dense 完整模型对照未过数值门槛，未宣称已修复。详见 `full_model_20261103.md`，其中保留负面结果和适用边界；新阶段的512-target continuation及长上下文诊断单列。
 

@@ -1,0 +1,86 @@
+{
+  "valid_evidence_accepted": true,
+  "corruptions_rejected": 16,
+  "checks": [
+    {
+      "case": "missing_checkpoint",
+      "rejected": true,
+      "reason": "all scheduled checkpoints required"
+    },
+    {
+      "case": "switched_checkpoint",
+      "rejected": true,
+      "reason": "test-based checkpoint switch"
+    },
+    {
+      "case": "missing_window",
+      "rejected": true,
+      "reason": "incomplete quality matrix"
+    },
+    {
+      "case": "changed_input",
+      "rejected": true,
+      "reason": "quality input mismatch"
+    },
+    {
+      "case": "changed_target",
+      "rejected": true,
+      "reason": "targets not end aligned"
+    },
+    {
+      "case": "changed_mask",
+      "rejected": true,
+      "reason": "sparse mask drift"
+    },
+    {
+      "case": "missing_pair",
+      "rejected": true,
+      "reason": "incomplete timing pairs"
+    },
+    {
+      "case": "changed_sequence",
+      "rejected": true,
+      "reason": "timing execution order changed"
+    },
+    {
+      "case": "changed_order",
+      "rejected": true,
+      "reason": "bad timing sample/order"
+    },
+    {
+      "case": "nan_timing",
+      "rejected": true,
+      "reason": "bad timing sample/order"
+    },
+    {
+      "case": "changed_speedup",
+      "rejected": true,
+      "reason": "inconsistent statistic"
+    },
+    {
+      "case": "wrong_source",
+      "rejected": true,
+      "reason": "unexpected run provenance"
+    },
+    {
+      "case": "changed_merge_gate",
+      "rejected": true,
+      "reason": "merge verdict mismatch"
+    },
+    {
+      "case": "nan_gradient",
+      "rejected": true,
+      "reason": "invalid preflight gradients"
+    },
+    {
+      "case": "changed_base",
+      "rejected": true,
+      "reason": "teacher/base changed"
+    },
+    {
+      "case": "wrong_diagnostic",
+      "rejected": true,
+      "reason": "diagnostic checkpoint mismatch"
+    }
+  ]
+}
