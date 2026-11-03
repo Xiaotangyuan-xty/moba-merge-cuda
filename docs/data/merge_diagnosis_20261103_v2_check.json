@@ -1,0 +1,35 @@
+{
+  "status": "frozen_proposal_not_executed",
+  "recipe_sha256": "60a07b307f0cd697c764649d13caea70cd609b93b9b9a0b28ad36d9fa5066f26",
+  "updates_per_arm": 120,
+  "input_token_visits_per_arm": 778240,
+  "supervised_positions_per_arm": 30720,
+  "context_counts": {
+    "2048": 60,
+    "8192": 40,
+    "16384": 20
+  },
+  "validation_windows": 24,
+  "fresh_test_windows": 12,
+  "fresh_test_intervals": [
+    [
+      98816,
+      115456
+    ],
+    [
+      147968,
+      164608
+    ],
+    [
+      229888,
+      246528
+    ],
+    [
+      279040,
+      295680
+    ]
+  ],
+  "training_schedule_sha256": "0c424b0474a950f4f2102c83b236b395072232a63e38a884d5d64edacbb8535f",
+  "fresh_test_evaluated": false,
+  "training_executed": false
+}

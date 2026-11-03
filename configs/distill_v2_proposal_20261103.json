@@ -1,0 +1,201 @@
+{
+  "version": 2,
+  "status": "frozen_proposal_not_executed",
+  "runner_implemented": false,
+  "purpose": "matched split-LoRA vs export-aware BF16 merge-forward pilot; no additional GPU training in diagnosis batch",
+  "model": {
+    "name": "Qwen/Qwen2.5-0.5B",
+    "revision": "060db6499f32faf8b98477b0a26969ef7d8b9987",
+    "weight_sha256": "88c142557820ccad55bb59756bfcfcf891de9cc6202816bd346445188a0ed342",
+    "config_sha256": "479dcf0c5286339e41ad3992cd08ae88a467c4187587936248e2b7c96283484b"
+  },
+  "seed": 20261103,
+  "dense_layers": [
+    3,
+    4,
+    5,
+    6,
+    7,
+    9,
+    10,
+    11,
+    13,
+    16,
+    17,
+    18
+  ],
+  "sparse_layer_count": 12,
+  "total_layers": 24,
+  "chunk": 128,
+  "topk": 4,
+  "lora": {
+    "rank": 8,
+    "alpha": 16,
+    "projections": [
+      "q_proj",
+      "k_proj",
+      "v_proj",
+      "o_proj"
+    ],
+    "parameters": 1081344
+  },
+  "arms": [
+    {
+      "name": "split_bf16_control",
+      "forward": "base(x) BF16 plus lowrank BF16;old arithmetic"
+    },
+    {
+      "name": "export_aware_bf16",
+      "forward": "linear(x,cast_bf16(W_base_fp32+scale*B_fp32@A_fp32));grad through cast"
+    }
+  ],
+  "initialization": "both arms restart from identical step_000 adapters and fresh AdamW;no step100 optimizer resume",
+  "optimizer_updates_per_arm": 120,
+  "batch_size": 1,
+  "gradient_accumulation": 1,
+  "context_cycle": [
+    2048,
+    2048,
+    8192,
+    2048,
+    8192,
+    16384
+  ],
+  "input_token_visits_per_arm": 778240,
+  "predicted_positions_per_update": 256,
+  "supervised_positions_per_arm": 30720,
+  "position_sampling": "128 uniform plus128 disjoint from final512;causal labels offset+1",
+  "loss": {
+    "kl_weight": 0.8,
+    "temperature": 2.0,
+    "ce_weight": 0.2,
+    "kl_reduction": "mean over prediction positions"
+  },
+  "optimizer": {
+    "name": "AdamW",
+    "learning_rate": 3e-05,
+    "warmup_updates": 10,
+    "min_learning_rate": 3e-06,
+    "decay": "cosine",
+    "weight_decay": 0.0,
+    "gradient_clip": 1.0
+  },
+  "validation_updates": [
+    0,
+    30,
+    60,
+    90,
+    120
+  ],
+  "validation_lengths": [
+    2048,
+    8192,
+    16384
+  ],
+  "validation_boundaries": [
+    32768,
+    65536,
+    98304,
+    131072,
+    163840,
+    196608,
+    229376,
+    262144
+  ],
+  "selection": "minimize worst per-window tail/continuation deltaNLL;ties earlier;all-window gate independently required;failed run remains failed",
+  "quality_gate": {
+    "delta_nll_per_window_and_metric": 0.05,
+    "required_valid_windows": 24,
+    "required_fresh_test_windows": 12
+  },
+  "export_gate": {
+    "relative_l2": 0.02,
+    "kl": 0.002,
+    "max_abs": 0.5
+  },
+  "export_gate_reference": "candidate training-mode eval versus its actual export;also report drift vs split control;never relabel old adapters as fixed",
+  "preflight_gates": [
+    "split arm reproduces original zero adapter baseline",
+    "export-aware eval equals materialized BF16 export on2K/8K/16K valid probes including routes",
+    "teacher and base immutable;3step finite A/B grads;no frozen grads",
+    "check checkpoint routes and gradients;2K/8K/16K256positions fit the fixed memory limit"
+  ],
+  "future_test": {
+    "boundaries": [
+      115200,
+      164352,
+      246272,
+      295424
+    ],
+    "lengths": [
+      2048,
+      8192,
+      16384
+    ],
+    "tail_targets": 512,
+    "continuation_targets": 256,
+    "token_count": 309009,
+    "excluded_intervals": [
+      [
+        0,
+        32768
+      ],
+      [
+        81920,
+        98560
+      ],
+      [
+        180224,
+        196864
+      ],
+      [
+        131072,
+        147712
+      ],
+      [
+        262144,
+        278784
+      ],
+      [
+        49152,
+        65792
+      ],
+      [
+        212992,
+        229632
+      ]
+    ],
+    "use": "one frozen valid-selected candidate per preregistered arm, evaluated once;new cohort required after any test-driven protocol change",
+    "quality_evaluated": false,
+    "token_count_source": "CPU tokenizer length only;no model/test scores"
+  },
+  "performance": "paired dense Graph timing only after quality/export gates;split adapter overhead reported;no speedup promise",
+  "artifacts": "save adapter,optimizer,scheduler,RNG,step,recipe hash to new paths;never overwrite base or prior pilot",
+  "abort_conditions": [
+    "preflight fails",
+    "16K exceeds approved memory;no silent length fallback",
+    "external GPU process appears",
+    "any nonfinite loss/gradient",
+    "cumulative resource budget exceeded"
+  ],
+  "execution_requires": "separate explicitly bounded training batch;not executed by this diagnosis task;single approved card,guard,CPUthreads2,allocator7GiB/device8GiB",
+  "corpus": {
+    "train": {
+      "bytes": 10797148,
+      "sha256": "9e9fa1ad55b1c2c95b08e37dd8e653f638fac2c6de904b79e813611eefbc985f"
+    },
+    "valid": {
+      "bytes": 1121681,
+      "sha256": "f0737ed31fc1329026e95cb8b98e19c2a182c39c240ab909dc31abf2f8af58e8"
+    },
+    "test": {
+      "bytes": 1256449,
+      "sha256": "d790b833ef8cf03a90db7bf1271b7520b83c45ce07ba3c1a9699df81e239eca0"
+    }
+  },
+  "initial_adapter_sha256": "0478f6d2db931aa1b994786790921e51938ae1207380f162c1bf870c6ef80ab3",
+  "train_token_count": 2549174,
+  "training_window_sampling": "distinct train end indices sampled uniformly on128-token grid;seed20261103;max context+128 lower bound;context assigned by cycle",
+  "position_seed_rule": "seed+100000+optimizer_step;128 uniform,then128 disjoint from final512;sorted",
+  "training_schedule_sha256": "0c424b0474a950f4f2102c83b236b395072232a63e38a884d5d64edacbb8535f"
+}

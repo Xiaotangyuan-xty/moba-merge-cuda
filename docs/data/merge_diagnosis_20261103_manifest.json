@@ -1,0 +1,69 @@
+{
+  "scope": "public evidence;manifest excludes itself;raw stage JSON byte-preserved",
+  "files": {
+    "merge_diagnosis_20261103_ablation_rows.csv": {
+      "bytes": 16333,
+      "sha256": "60f3754a69601b460a23c04b02ddf5b6922f9c8b2c7dc5df19cc5e0b18a7c4b4"
+    },
+    "merge_diagnosis_20261103_cpu_audit.json": {
+      "bytes": 1476,
+      "sha256": "8f73d636476d9a826b5b93d2877e69e5692ecf53a8413811463a9c01f419a4c8"
+    },
+    "merge_diagnosis_20261103_diagnose_01.json": {
+      "bytes": 1933061,
+      "sha256": "0cf42c002c3d65ec4277dc844db15dce6e66776f340ba158733d87583ae12bae"
+    },
+    "merge_diagnosis_20261103_expanded_02.json": {
+      "bytes": 129832,
+      "sha256": "954ca2d3c5a7667ab513f742dce03f309dbfad917b537f437e903624eafc9f9c"
+    },
+    "merge_diagnosis_20261103_expanded_aggregates.csv": {
+      "bytes": 3858,
+      "sha256": "26025f8cf46f90d17e14c9ee770093e744b244c5c64712230e999cc94d02b9fd"
+    },
+    "merge_diagnosis_20261103_expanded_windows.csv": {
+      "bytes": 46930,
+      "sha256": "996f52c02c18317630d60507db1051b1b19f5fd3ab200f788ee69b93ab2c9776"
+    },
+    "merge_diagnosis_20261103_projection_rows.csv": {
+      "bytes": 580571,
+      "sha256": "6eb6d06914a3570909172026aa28489c72100639d89a4b6ef0c213dde8881784"
+    },
+    "merge_diagnosis_20261103_recipe.json": {
+      "bytes": 776,
+      "sha256": "5492c9e7150073b378fe33d7ddfdaa9bb56dc52aa3f1872c172b678efc6e8cf9"
+    },
+    "merge_diagnosis_20261103_release_checks.json": {
+      "bytes": 426,
+      "sha256": "7acfbc1102278d6ae723b426a7b9f5d6998b2c750870d4731fed5d173b4acda2"
+    },
+    "merge_diagnosis_20261103_resources.json": {
+      "bytes": 1981,
+      "sha256": "a2e7f05a78a401f51d6c7afe5aff008c1763a2a9015f706c5a4da6b629fb197b"
+    },
+    "merge_diagnosis_20261103_route_rows.csv": {
+      "bytes": 75487,
+      "sha256": "325a96bee7118953bcff329dfb6c6db7251189976c2cc5cb7e62c72598e77e84"
+    },
+    "merge_diagnosis_20261103_summary.json": {
+      "bytes": 7939,
+      "sha256": "4a751738eb7917a5c90b9aa3562256ce58c216402307d1ab93df7b404ec6c3a5"
+    },
+    "merge_diagnosis_20261103_tests.json": {
+      "bytes": 784,
+      "sha256": "4878585d18bab32a3312db966fb5e935b85db249568b58103ecf39341a627ec3"
+    },
+    "merge_diagnosis_20261103_v2_check.json": {
+      "bytes": 724,
+      "sha256": "8014ae78cf272b07757b987813f869999e8ad9a61cbc9259b7b166fb3e33805d"
+    },
+    "merge_diagnosis_20261103_v2_proposal.json": {
+      "bytes": 5542,
+      "sha256": "60a07b307f0cd697c764649d13caea70cd609b93b9b9a0b28ad36d9fa5066f26"
+    },
+    "merge_diagnosis_20261103_weight_rows.csv": {
+      "bytes": 21390,
+      "sha256": "16b15fd779e4374a7d6adae42caa8635fdb75d402726d2900ad0a6b9fb9eecea"
+    }
+  }
+}

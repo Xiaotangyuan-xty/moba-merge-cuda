@@ -1,0 +1,66 @@
+{
+  "valid_evidence_accepted": true,
+  "corruptions_rejected": 12,
+  "checks": [
+    {
+      "case": "missing_case",
+      "rejected": true,
+      "reason": "incomplete/duplicate diagnostic matrix"
+    },
+    {
+      "case": "gate_misreport",
+      "rejected": true,
+      "reason": "changed merge gate verdict"
+    },
+    {
+      "case": "input_change",
+      "rejected": true,
+      "reason": "ablation input changed"
+    },
+    {
+      "case": "missing_route",
+      "rejected": true,
+      "reason": "incomplete/duplicate diagnostic matrix"
+    },
+    {
+      "case": "impossible_route",
+      "rejected": true,
+      "reason": "invalid route count"
+    },
+    {
+      "case": "nonfinite_projection",
+      "rejected": true,
+      "reason": "nonfinite projection metric"
+    },
+    {
+      "case": "impossible_weight",
+      "rejected": true,
+      "reason": "invalid weight count"
+    },
+    {
+      "case": "missing_window",
+      "rejected": true,
+      "reason": "incomplete/duplicate diagnostic matrix"
+    },
+    {
+      "case": "target_change",
+      "rejected": true,
+      "reason": "targets differ across lengths"
+    },
+    {
+      "case": "layer_change",
+      "rejected": true,
+      "reason": "quality scope changed"
+    },
+    {
+      "case": "mean_change",
+      "rejected": true,
+      "reason": "inconsistent statistic"
+    },
+    {
+      "case": "checkpoint_switch",
+      "rejected": true,
+      "reason": "retrospective checkpoint switch"
+    }
+  ]
+}

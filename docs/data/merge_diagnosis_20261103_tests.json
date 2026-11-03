@@ -1,0 +1,35 @@
+{
+  "runs": [
+    {
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "4.498",
+      "run": "unit_01",
+      "source_commit": "c0b8118b8f0e565f29afa98abfd51cb2137be758",
+      "passed": 4,
+      "skips": []
+    },
+    {
+      "tests": "568",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "2",
+      "time": "23.457",
+      "run": "regression_01",
+      "source_commit": "945ccda88f38381055fc55626d1d962edd8127c8",
+      "passed": 566,
+      "skips": [
+        {
+          "name": "test_cuda_ext_runs_on_input_device",
+          "reason": "needs >=2 visible devices"
+        },
+        {
+          "name": "test_triton_runs_on_input_device",
+          "reason": "needs >=2 visible devices"
+        }
+      ]
+    }
+  ]
+}

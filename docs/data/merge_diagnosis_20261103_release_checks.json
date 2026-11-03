@@ -1,0 +1,11 @@
+{
+  "checked_utc": "2026-11-03T06:52:31.231683+00:00",
+  "source_commit": "945ccda88f38381055fc55626d1d962edd8127c8",
+  "worktree_clean": true,
+  "upstream_commit": "b5d58363311d3ca946f1ec444182727c15e338b5",
+  "upstream_clean": true,
+  "base_model_safetensors_sha256": "88c142557820ccad55bb59756bfcfcf891de9cc6202816bd346445188a0ed342",
+  "physical_gpu": 1,
+  "gpu_memory_used_mib": 0,
+  "gpu_has_compute_processes": false
+}

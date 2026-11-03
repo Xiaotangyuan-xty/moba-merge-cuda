@@ -19,6 +19,8 @@ decode 旧阶段相对冻结 cache v1 的 28 配置性能取证见 `decode_perf_
 
 新增实验性 `examples/qwen2_distillation.py` 提供Qwen2.5-0.5B、batch=1的独立prefill LoRA autograd forward，复用已验证Attention一阶反向；不改变cache/Graph的inference-only契约。100次更新固定12/24层稀疏、Q/K/V/O rank8；“50%”是层数比例，不是总Attention/FLOPs减半。2K/8K训练、2K/8K/16K新窗口评估，valid选25步未合并adapter仅2/6窗口通过ΔNLL≤0.05，100步未合并事后诊断为4/6，未改变选点；两者的BF16合并门槛均失败，合并版仅诊断，未合并版更慢。没有完全恢复质量、稳定收敛、可部署加速或1.5B训练结论。Adapter保存但没有optimizer状态，不能精确恢复Adam轨迹。完整失败记录、单seed/有限监督与资源边界见 `distill_pilot_20261103.md`。
 
+后续 `merge_diagnosis_20261103.md` 定位BF16投影形式差异和路由放大：局部FP32代数控制通过，固定原split路由后仍有门槛失败；FP32合并投影也不是完整修复。Route replay只在诊断example中、相同元数据下运行，依赖原路由，不能部署或用于性能声明。扩展valid至8边界×3长度24窗，旧25步/100步分别仅1/24、3/24通过；这不是新的test，也没有改选主checkpoint。导出感知BF16训练仍只是未执行协议（`distill_v2_protocol_20261103.md`），尚无实现与新权重质量证据。
+
 前一完整模型阶段质量仅评估 WikiText-2 tokenized test 的前 4×2048-token 块（8188 个目标）、128 个 continuation 目标与六个 synthetic passkey。该阶段正式 36 行延迟没有证明真正稀疏路径优于所测 dense Graph。相对 HF eager 的约 4.3–4.6× 是 dense Graph/集成收益，不是稀疏算法或完整请求收益。packed QKV 仅为 opt-in，数值差异接近短用例门槛；默认旧 sparse prefill 不保证跨运行逐位复现。早期 Triton dense 完整模型对照未过数值门槛，未宣称已修复。详见 `full_model_20261103.md`，其中保留负面结果和适用边界；新阶段的512-target continuation及长上下文诊断单列。
 
 ## 历史 MHA 基线支持范围（方案 2.4，56eedcd）
