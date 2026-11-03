@@ -1,0 +1,147 @@
+{
+  "version": 1,
+  "model": "Qwen/Qwen2.5-0.5B",
+  "model_revision": "060db6499f32faf8b98477b0a26969ef7d8b9987",
+  "model_weight_sha256": "88c142557820ccad55bb59756bfcfcf891de9cc6202816bd346445188a0ed342",
+  "model_config_sha256": "479dcf0c5286339e41ad3992cd08ae88a467c4187587936248e2b7c96283484b",
+  "seed": 20261103,
+  "dense_layers": [
+    3,
+    4,
+    5,
+    6,
+    7,
+    9,
+    10,
+    11,
+    13,
+    16,
+    17,
+    18
+  ],
+  "num_layers": 24,
+  "chunk": 128,
+  "topk": 4,
+  "lora": {
+    "rank": 8,
+    "alpha": 16,
+    "projections": [
+      "q_proj",
+      "k_proj",
+      "v_proj",
+      "o_proj"
+    ],
+    "parameters": 1081344
+  },
+  "training": {
+    "updates": 100,
+    "batch_size": 1,
+    "gradient_accumulation": 1,
+    "lengths": [
+      2048,
+      8192
+    ],
+    "length_schedule": "three2K then one8K",
+    "predicted_positions": 64,
+    "position_sampling": "32 uniform plus32 disjoint last512",
+    "learning_rate": 0.0001,
+    "warmup_updates": 10,
+    "minimum_lr_ratio": 0.1,
+    "weight_decay": 0.0,
+    "gradient_clip": 1.0,
+    "temperature": 2.0,
+    "kl_weight": 0.8,
+    "validate_updates": [
+      0,
+      25,
+      50,
+      75,
+      100
+    ],
+    "selection": "minimum worst per-window tail/continuation deltaNLL;ties earlier;include step0"
+  },
+  "lengths": [
+    2048,
+    8192,
+    16384
+  ],
+  "tail_targets": 512,
+  "continuation_targets": 256,
+  "target_boundaries": {
+    "valid": [
+      196608,
+      229376
+    ],
+    "test": [
+      65536,
+      229376
+    ]
+  },
+  "excluded_test_intervals": [
+    [
+      0,
+      32768
+    ],
+    [
+      81920,
+      98560
+    ],
+    [
+      180224,
+      196864
+    ],
+    [
+      131072,
+      147712
+    ],
+    [
+      262144,
+      278784
+    ]
+  ],
+  "corpus": {
+    "train": {
+      "bytes": 10797148,
+      "sha256": "9e9fa1ad55b1c2c95b08e37dd8e653f638fac2c6de904b79e813611eefbc985f"
+    },
+    "valid": {
+      "bytes": 1121681,
+      "sha256": "f0737ed31fc1329026e95cb8b98e19c2a182c39c240ab909dc31abf2f8af58e8"
+    },
+    "test": {
+      "bytes": 1256449,
+      "sha256": "d790b833ef8cf03a90db7bf1271b7520b83c45ce07ba3c1a9699df81e239eca0"
+    }
+  },
+  "heldout_delta_nll": 0.05,
+  "merge_gate": {
+    "relative_l2": 0.02,
+    "kl": 0.002,
+    "max_abs": 0.5
+  },
+  "latency": {
+    "warmup": 3,
+    "rounds": 3,
+    "samples": 8,
+    "runs": 2
+  },
+  "resource": {
+    "approved_physical_gpus": [
+      0,
+      1
+    ],
+    "preferred_gpu": 1,
+    "process_limit_seconds": 1200,
+    "device_limit_mib": 8192,
+    "allocator_gib": 7,
+    "cpu_threads": 2
+  },
+  "preflight": "native teacher and zero adapter equivalence;checkpoint/recompute routes and gradients;2K/8K fwd+bwd;3 optimizer updates in separate process",
+  "evaluation_methods": [
+    "dense",
+    "untrained",
+    "selected_unmerged",
+    "selected_merged",
+    "last_merged"
+  ]
+}

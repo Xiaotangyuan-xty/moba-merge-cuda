@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run an explicitly approved GPU1 batch with private per-batch resource limits.
+"""Run an explicitly approved single-card batch (default GPU1).
 
 Monitors via nvidia-smi. If another process appears, terminate only the child
 process group created here. No process discovery/kill outside that group.
@@ -17,6 +17,7 @@ import re
 from datetime import datetime, timezone
 
 GPU_UUID=os.environ.get("MOBA_COVERAGE_GPU_UUID")
+GPU_INDEX=int(os.environ.get("MOBA_APPROVED_GPU_INDEX", "1"))
 ROOT=Path(__file__).resolve().parents[1]
 LIMIT_SECONDS=int(os.environ.get("MOBA_BATCH_LIMIT_SECONDS", "900"))
 LIMIT_MIB=int(os.environ.get("MOBA_BATCH_LIMIT_MIB", "6144"))
@@ -24,6 +25,7 @@ BATCH_ID=os.environ.get("MOBA_BATCH_ID", "coverage_20261101")
 
 
 def inspect():
+    if GPU_INDEX not in (0,1):raise RuntimeError('Only explicitly approved GPU0/GPU1 may be selected')
     if not GPU_UUID:
         raise RuntimeError("Set MOBA_COVERAGE_GPU_UUID in private env.local.sh after approval")
     gpu_text=subprocess.check_output(["nvidia-smi","--id="+GPU_UUID,"--query-gpu=index,uuid,name,memory.used,memory.total",
@@ -32,8 +34,8 @@ def inspect():
                                        "--format=csv,noheader,nounits"],text=True,timeout=10)
     devices=[list(map(str.strip,row)) for row in csv.reader(gpu_text.splitlines())]
     target=next((row for row in devices if row[1]==GPU_UUID),None)
-    if target is None or target[0]!="1":
-        raise RuntimeError("Approved physical GPU1 UUID is absent or changed; refusing to run")
+    if target is None or target[0]!=str(GPU_INDEX):
+        raise RuntimeError("Approved physical GPU UUID/index is absent or changed; refusing to run")
     procs=[list(map(str.strip,row)) for row in csv.reader(proc_text.splitlines()) if row]
     pids={int(row[1]) for row in procs if row[0]==GPU_UUID}
     return int(target[3]),pids,{"gpus":gpu_text,"processes":proc_text}
@@ -71,7 +73,7 @@ def main():
     used,pids,before=inspect()
     if pids or used>64:
         (out/(args.tag+"_blocked.json")).write_text(json.dumps(before,indent=2))
-        raise SystemExit("GPU1 is occupied; no task started and no other GPU selected")
+        raise SystemExit("Approved GPU is occupied; no task started and no other GPU selected")
     env=os.environ.copy()
     env.update(CUDA_VISIBLE_DEVICES=GPU_UUID,CUDA_DEVICE_ORDER="PCI_BUS_ID",
                OMP_NUM_THREADS="2",MKL_NUM_THREADS="2",OPENBLAS_NUM_THREADS="2",MAX_JOBS="2")
@@ -94,7 +96,7 @@ def main():
                 used,pids,_=inspect()
                 peak=max(peak,used)
                 if pids-{proc.pid}:
-                    reason="foreign process entered GPU1";break
+                    reason="foreign process entered approved GPU";break
                 if used>LIMIT_MIB:
                     reason="approved batch memory ceiling exceeded";break
                 if time.monotonic()-started>remaining:
